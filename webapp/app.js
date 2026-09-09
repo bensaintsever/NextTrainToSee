@@ -256,11 +256,12 @@ function describePhase(p, now) {
 
   let sub;
   // Simplifié (retour utilisateur) : plus de « dès HH:MM:SS », redondant
-  // avec l'heure déjà affichée en grand juste au-dessus.
-  if (now < annAt) sub = `guette dans ${fmtDur(annAt - now)}`;
-  else if (now < whenAt) sub = `à l'affût · passage dans ${fmtDur(whenAt - now)}`;
-  else if (now <= endAt) sub = '👀 regarde, il devrait passer !';
-  else sub = 'passage attendu…';
+  // avec l'heure déjà affichée en grand juste au-dessus. Casse cohérente
+  // (majuscule initiale) sur les quatre états, comme le reste de l'app.
+  if (now < annAt) sub = `Guette dans ${fmtDur(annAt - now)}`;
+  else if (now < whenAt) sub = `À l'affût · passage dans ${fmtDur(whenAt - now)}`;
+  else if (now <= endAt) sub = '👀 Regarde, il devrait passer !';
+  else sub = 'Passage attendu…';
 
   return { sub, imminent };
 }
@@ -321,9 +322,8 @@ function renderSky() {
   countdown.textContent = phase.sub;
   skyPanel.classList.toggle('imminent', phase.imminent);
 
-  const arrow = p.direction === 'outbound' ? '▼' : '▲';
   const lookPhrase = LOOK_PHRASES[p.look] || '';
-  direction.textContent = `${arrow} ${p.direction_label} · ${lookPhrase}`;
+  direction.textContent = `${p.direction_label} · ${lookPhrase}`;
 
   const cat = CATEGORY_LABELS[p.category_id] || (p.category_id || '').toUpperCase();
   const bits = [cat, p.headsign].filter(Boolean).join(' ');

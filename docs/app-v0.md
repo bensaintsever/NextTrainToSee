@@ -56,7 +56,7 @@ y est calme :
 ┌─────────────────────────┐
 │  ZONE HAUTE (le ciel)   │  heure du prochain passage, très grande,
 │  22:47:43   ±20 s       │  police pixel ; dessous : compte à rebours
-│  ▼ Depuis Matabiau        │  « guette dès HH:MM:SS » + direction + n° train
+│  Depuis Matabiau        │  « Guette dans MM:SS » + direction + n° train
 ├─────────────────────────┤
 │                         │
 │   (illustration libre : │
@@ -73,9 +73,10 @@ y est calme :
   doit rester lisible sans réseau vers Google.
 - Lisibilité sur image : textes blancs, `text-shadow` net + léger bandeau
   `rgba(0,0,0,.35)` derrière les blocs.
-- Direction (cf. § 5) : « Depuis Matabiau » s'accompagne de « ▼ il sort du
-  tunnel » (le tunnel est en haut de l'illustration, côté Matabiau) ;
-  « Vers Matabiau » de « ▲ il arrive du sud, derrière toi ».
+- Direction (cf. § 5) : « Depuis Matabiau » s'accompagne de « sort du tunnel »
+  (le tunnel est en haut de l'illustration, côté Matabiau) ; « Vers Matabiau »
+  de « arrive du sud ». Texte seul, sans flèche (retour utilisateur : la
+  flèche devant le libellé n'apportait rien que le texte ne dise déjà).
 - Compte à rebours piloté par `announce_at`, pas par `when` : annoncer tard
   fait rater le train, annoncer tôt ne coûte rien. Quand
   `now ≥ announce_at - 30 s`, la zone haute passe en état « imminent »
