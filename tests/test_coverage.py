@@ -51,7 +51,7 @@ def test_realtime_share_is_measured_per_lead_time():
 
     assert stats["plus d'une heure"].realtime_share == 0.0
     assert stats["30 à 60 min"].realtime_share == 0.0
-    assert stats["moins de 10 min"].realtime_share == 1.0
+    assert stats["5 à 10 min"].realtime_share == 1.0
 
 
 def test_estimations_are_counted_in_their_bucket():
@@ -60,7 +60,7 @@ def test_estimations_are_counted_in_their_bucket():
     ))}
     assert stats["plus d'une heure"].sample_count == 1
     assert stats["10 à 30 min"].sample_count == 2
-    assert stats["moins de 10 min"].sample_count == 0
+    assert stats["5 à 10 min"].sample_count == 0
 
 
 def test_empty_buckets_are_still_reported():
@@ -87,7 +87,7 @@ def test_drift_is_measured_against_the_final_estimate():
         a=estimates((90, -120, None), (5, 0, 0)),
     ))}
     assert stats["plus d'une heure"].drift_median_s == pytest.approx(120.0)
-    assert stats["moins de 10 min"].drift_median_s == pytest.approx(0.0)
+    assert stats["5 à 10 min"].drift_median_s == pytest.approx(0.0)
 
 
 def test_a_stable_prediction_shows_no_drift():
@@ -241,7 +241,7 @@ def test_estimates_made_after_the_passage_never_serve_as_reference():
 
     stats = {s.bucket.label: s for s in analyse(history(a=est))}
     assert stats["10 à 30 min"].too_late_share() == 0.0
-    assert stats["moins de 10 min"].too_late_share() == 0.0
+    assert stats["5 à 10 min"].too_late_share() == 0.0
 
 
 def test_delays_are_summarised_on_the_pre_passage_reference():
@@ -259,3 +259,24 @@ def test_a_passage_only_seen_after_the_fact_is_ignored():
 
     assert reference_estimate(estimates((-5, 0, None))) is None
     assert summarise_delays(history(a=estimates((-5, 0, None)))).passage_count == 0
+
+
+def test_the_shortest_lead_time_has_its_own_bucket():
+    # C'est la tranche où quelqu'un se poste vraiment : elle ne doit pas être
+    # noyée dans un « moins de dix minutes » plus permissif.
+    labels = [b.label for b in DEFAULT_BUCKETS]
+    assert labels[0] == "moins de 5 min"
+    stats = {s.bucket.label: s for s in analyse(history(a=estimates((3, 0, 0), (1, 0, 0))))}
+    assert stats["moins de 5 min"].sample_count == 2
+    assert stats["5 à 10 min"].sample_count == 0
+
+
+def test_the_count_of_late_announcements_is_reported_beside_the_share():
+    # « 0 sur 231 » et « 2 sur 220 » s'arrondissent tous deux à 0 %.
+    stats = {s.bucket.label: s for s in analyse(history(
+        a=estimates((20, 120, None), (1, 0, 0)),
+        b=estimates((20, 0, None), (1, 0, 0)),
+    ))}
+    entry = stats["10 à 30 min"]
+    assert entry.too_late_count() == 1
+    assert entry.sample_count == 2

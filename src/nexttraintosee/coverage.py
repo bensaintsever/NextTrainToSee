@@ -45,7 +45,11 @@ class LeadBucket:
 
 
 DEFAULT_BUCKETS = (
-    LeadBucket("moins de 10 min", 0.0, 600.0),
+    # La tranche la plus courte est isolée : c'est celle où quelqu'un se poste
+    # réellement pour voir passer le train, donc la seule où une annonce
+    # tardive se paie.
+    LeadBucket("moins de 5 min", 0.0, 300.0),
+    LeadBucket("5 à 10 min", 300.0, 600.0),
     LeadBucket("10 à 30 min", 600.0, 1800.0),
     LeadBucket("30 à 60 min", 1800.0, 3600.0),
     LeadBucket("plus d'une heure", 3600.0, float("inf")),
@@ -83,6 +87,14 @@ class BucketStats:
         ordered = sorted(abs(d) for d in self.drifts_s)
         return ordered[min(len(ordered) - 1, int(0.9 * len(ordered)))]
 
+    def too_late_count(self, tolerance_s: float = 30.0) -> int:
+        """Nombre d'estimations annonçant le passage trop tard.
+
+        Le compte importe autant que la part : « 0 sur 231 » et « 2 sur 220 »
+        s'arrondissent tous deux à 0 %, mais ne disent pas la même chose.
+        """
+        return sum(1 for d in self.drifts_s if d > tolerance_s)
+
     def too_late_share(self, tolerance_s: float = 30.0) -> float:
         """Part des estimations qui annonçaient le passage trop tard.
 
@@ -92,7 +104,7 @@ class BucketStats:
         """
         if not self.drifts_s:
             return 0.0
-        return sum(1 for d in self.drifts_s if d > tolerance_s) / len(self.drifts_s)
+        return self.too_late_count(tolerance_s) / len(self.drifts_s)
 
     def too_late_worst_s(self) -> float:
         """Pire retard d'annonce constaté, en secondes."""

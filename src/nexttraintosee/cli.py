@@ -691,19 +691,20 @@ def cmd_coverage(args: argparse.Namespace) -> int:
     repeated = sum(1 for estimates in history.values() if len(estimates) > 1)
     print(f"{len(history)} passages suivis, dont {repeated} estimés plusieurs fois\n")
 
-    print(f"{'échéance':<20s} {'estim.':>7s} {'temps réel':>11s} "
+    print(f"{'échéance':<18s} {'estim.':>7s} {'temps réel':>11s} "
           f"{'dérive méd.':>12s} {'annoncé trop tard':>19s} {'pire':>8s}")
     for entry in analyse(history):
         if not entry.sample_count:
-            print(f"{entry.bucket.label:<20s} {'—':>7s}")
+            print(f"{entry.bucket.label:<18s} {'—':>7s}")
             continue
         median = entry.drift_median_s
+        late = f"{entry.too_late_count()} sur {entry.sample_count}"
         print(
-            f"{entry.bucket.label:<20s} {entry.sample_count:>7d} "
+            f"{entry.bucket.label:<18s} {entry.sample_count:>7d} "
             f"{entry.realtime_share:>10.0%} "
             f"{(f'{median:.0f} s' if median is not None else '—'):>12s} "
-            f"{entry.too_late_share():>18.0%} "
-            f"{entry.too_late_worst_s():>7.0f} s"
+            f"{late:>13s} {entry.too_late_share():>5.1%} "
+            f"{entry.too_late_worst_s():>6.0f} s"
         )
 
     summary = summarise_delays(history)
