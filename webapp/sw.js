@@ -8,7 +8,7 @@
  * référence).
  */
 
-const CACHE_NAME = 'nexttraintosee-static-v1';
+const CACHE_NAME = 'nexttraintosee-static-v2';
 const STATIC_FILES = [
   './',
   'index.html',
@@ -41,16 +41,16 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
   if (event.request.method !== 'GET') return;
 
+  // Réseau d'abord, cache en secours : le serveur est sur le réseau local,
+  // donc quasi toujours joignable — et l'app se met à jour dès qu'on la
+  // redéploie, au lieu de servir à vie la première version mise en cache.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.ok && url.origin === location.origin) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        }
-        return response;
-      }).catch(() => cached);
-    })
+    fetch(event.request).then((response) => {
+      if (response.ok && url.origin === location.origin) {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+      }
+      return response;
+    }).catch(() => caches.match(event.request))
   );
 });

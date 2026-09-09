@@ -21,14 +21,18 @@ const CONFIRM_DELAY_MS = 90_000;      // carte après when + uncertainty + 90 s
 const CONFIRM_TTL_MS = 10 * 60_000;   // la carte s'efface après 10 min sans réponse
 
 // Phrases fixes liées à `look`, tel que fourni par le serveur (§ 3 et § 5).
+// Raccourcies (retour utilisateur : « trop serré ») — sans « derrière toi ».
 const LOOK_PHRASES = {
-  tunnel: 'il sort du tunnel',
-  sud: 'il arrive du sud, derrière toi',
+  tunnel: 'sort du tunnel',
+  sud: 'arrive du sud',
 };
 
 const CATEGORY_LABELS = {
   ter: 'TER',
-  grandes_lignes: 'Grandes lignes',
+  // Le serveur réel envoie « grandes-lignes » (trait d'union, cf.
+  // config/toulouse-guilhemery.toml) ; l'alias souligné est toléré au cas où.
+  'grandes-lignes': 'Intercités/TGV',
+  grandes_lignes: 'Intercités/TGV',
   intercites: 'Intercités',
   tgv: 'TGV',
   tgv_inoui: 'TGV inOui',
@@ -251,7 +255,9 @@ function describePhase(p, now) {
   const imminent = now >= annAt - IMMINENT_LEAD_MS && now <= endAt;
 
   let sub;
-  if (now < annAt) sub = `guette dès ${fmtHMS(p.announce_at)} · dans ${fmtDur(annAt - now)}`;
+  // Simplifié (retour utilisateur) : plus de « dès HH:MM:SS », redondant
+  // avec l'heure déjà affichée en grand juste au-dessus.
+  if (now < annAt) sub = `guette dans ${fmtDur(annAt - now)}`;
   else if (now < whenAt) sub = `à l'affût · passage dans ${fmtDur(whenAt - now)}`;
   else if (now <= endAt) sub = '👀 regarde, il devrait passer !';
   else sub = 'passage attendu…';
@@ -287,7 +293,7 @@ function renderSky() {
 
   badgeRt.hidden = false;
   if (p.realtime) {
-    badgeRt.textContent = 'TR';
+    badgeRt.textContent = 'temps réel';
     badgeRt.classList.remove('theoretical');
   } else {
     badgeRt.textContent = 'horaire théorique';
@@ -453,7 +459,16 @@ function onConfirmNo() {
   if (!p) return;
   pendingManualPassage = p;
   hideConfirmCard();
+  prefillManualTime();
   openSheet(manualSheetEl, manualBackdropEl);
+}
+
+/** Pré-remplit le champ heure avec l'heure courante au moment de l'OUVERTURE
+ *  de la sheet (pas au chargement de la page) : c'est la meilleure estimation
+ *  par défaut quand on répond « Non », l'utilisateur n'a plus qu'à l'ajuster. */
+function prefillManualTime() {
+  const now = new Date();
+  manualTimeInput.value = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }
 
 // ---------------------------------------------------------------------------

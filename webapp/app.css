@@ -66,25 +66,26 @@ button {
 }
 
 /* Zone haute — le ciel dégagé + le haut du tunnel : calme sur l'illustration,
-   jamais jusqu'au nez du train. */
+   jamais jusqu'au nez du train. Quatre niveaux, aérés (§ retour utilisateur
+   « trop serré ») : badges → heure+incertitude → compte à rebours → direction. */
 .zone--sky {
   top: 0;
-  padding-top: calc(env(safe-area-inset-top) + 10px);
-  gap: 8px;
+  padding-top: calc(env(safe-area-inset-top) + 14px);
 }
 
-/* Zone basse — la voie et le ballast : calme, aucun personnage. */
+/* Zone basse — la voie et le ballast : calme, aucun personnage. Accueille
+   désormais l'identité du train, le passage suivant, puis les actions. */
 .zone--track {
   bottom: 0;
   padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
-  gap: 10px;
+  gap: 12px;
 }
 
 .panel {
   pointer-events: none;
   background: var(--panel-bg);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 12px 16px;
   backdrop-filter: blur(1px);
 }
 
@@ -93,6 +94,7 @@ button {
   gap: 8px;
   justify-content: center;
   flex-wrap: wrap;
+  margin-bottom: 4px;
 }
 
 .badge {
@@ -110,37 +112,53 @@ button {
 .badge--delay { color: var(--danger); }
 .badge--delay.on-time { color: var(--ok); }
 
+/* Niveau 2 : l'heure, géante, avec son incertitude collée dessous en petit —
+   les deux forment un seul bloc visuel, distinct du reste. */
+.time-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  margin-top: 12px;
+}
+
 .big-time {
-  font-size: clamp(2.1rem, 11vw, 3rem);
-  line-height: 1.15;
+  font-size: clamp(2.3rem, 12vw, 3.2rem);
+  line-height: 1.1;
   text-shadow: var(--shadow-hard);
-  margin-top: 4px;
 }
 
 .uncertainty {
-  font-size: .6rem;
-  opacity: .9;
+  font-size: .5rem;
+  opacity: .8;
   text-shadow: var(--shadow-hard);
 }
 
+/* Niveau 3 : le compte à rebours, promu accent visuel (ambré), nettement
+   séparé du bloc heure au-dessus et de la direction en dessous. */
 .countdown {
-  font-size: .55rem;
-  opacity: .95;
+  font-size: .75rem;
+  color: var(--accent);
   text-shadow: var(--shadow-hard);
   min-height: 1.2em;
+  margin-top: 22px;
+  letter-spacing: .5px;
 }
 
+/* Niveau 4 : la direction, séparée à son tour. */
 .direction {
   font-size: .6rem;
   text-shadow: var(--shadow-hard);
   line-height: 1.6;
+  margin-top: 18px;
 }
 
 .train-info {
-  font-size: .5rem;
-  opacity: .85;
+  font-size: .55rem;
+  opacity: .9;
   text-shadow: var(--shadow-hard);
   line-height: 1.6;
+  margin-bottom: 6px;
 }
 
 /* État « imminent » : pulsation discrète entre announce_at - 30 s et
@@ -174,6 +192,10 @@ button {
 
 .btn {
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 44px;
   min-width: 44px;
   padding: 10px 16px;
@@ -189,6 +211,15 @@ button {
 
 .btn:active { transform: translateY(1px) scale(.98); }
 
+/* Icônes Font Awesome Free inline (cf. index.html) : `currentColor`, taille
+   harmonisée à la police pixel du bouton qui les porte. */
+.btn-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 0 #000);
+}
+
 .btn-seen {
   background: rgba(46, 92, 58, .72);
   border-color: rgba(143, 227, 143, .7);
@@ -197,8 +228,12 @@ button {
 }
 
 .btn-histo {
-  font-size: 1.1rem;
-  padding: 10px 14px;
+  padding: 12px 16px;
+}
+
+.btn-icon--solo {
+  width: 18px;
+  height: 18px;
 }
 
 .btn-small { font-size: .55rem; padding: 9px 14px; }

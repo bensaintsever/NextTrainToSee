@@ -36,29 +36,42 @@
 
 <main class="layer">
 
-  <!-- ZONE HAUTE — le ciel : prochain passage -->
+  <!-- ZONE HAUTE — le ciel : prochain passage. Quatre niveaux bien aérés :
+       badges, heure géante (+ incertitude, discrète, collée à l'heure),
+       compte à rebours (accent ambré), direction. L'identité du train est
+       descendue en zone basse (moins serré, plus de place là-bas). -->
   <section class="zone zone--sky" id="zone-sky">
     <div class="panel sky-panel" id="sky-panel">
       <div class="badge-row">
         <span class="badge badge--rt" id="badge-rt">—</span>
         <span class="badge badge--delay" id="badge-delay" hidden></span>
       </div>
-      <div class="big-time" id="big-time">—</div>
-      <div class="uncertainty" id="uncertainty">&nbsp;</div>
+      <div class="time-group">
+        <div class="big-time" id="big-time">—</div>
+        <div class="uncertainty" id="uncertainty">&nbsp;</div>
+      </div>
       <div class="countdown" id="countdown">&nbsp;</div>
       <div class="direction" id="direction">&nbsp;</div>
-      <div class="train-info" id="train-info">&nbsp;</div>
     </div>
   </section>
 
-  <!-- ZONE BASSE — la voie : passage suivant + actions -->
+  <!-- ZONE BASSE — la voie : plus de place ici, donc on y descend l'identité
+       du train (libellé de catégorie propre, jamais l'identifiant brut),
+       le passage suivant, puis les actions. -->
   <section class="zone zone--track" id="zone-track">
     <div class="panel next-panel">
+      <div class="train-info" id="train-info">&nbsp;</div>
       <div class="next-line" id="next-line">…</div>
     </div>
     <div class="actions">
-      <button id="btn-seen" class="btn btn-seen" type="button">🚆 Il passe !</button>
-      <button id="btn-histo" class="btn btn-histo" type="button" aria-label="Statistiques de passage">📊</button>
+      <!-- Icônes : Font Awesome Free (CC BY 4.0) — https://fontawesome.com/license/free -->
+      <button id="btn-seen" class="btn btn-seen" type="button">
+        <svg class="btn-icon" viewBox="0 0 448 512" fill="currentColor" aria-hidden="true"><path d="M96 0C43 0 0 43 0 96V352c0 48 35.2 87.7 81.1 94.9l-46 46C28.1 499.9 33.1 512 43 512H82.7c8.5 0 16.6-3.4 22.6-9.4L160 448H288l54.6 54.6c6 6 14.1 9.4 22.6 9.4H405c10 0 15-12.1 7.9-19.1l-46-46c46-7.1 81.1-46.9 81.1-94.9V96c0-53-43-96-96-96H96zM64 96c0-17.7 14.3-32 32-32H352c17.7 0 32 14.3 32 32v96c0 17.7-14.3 32-32 32H96c-17.7 0-32-14.3-32-32V96zM224 288a48 48 0 1 1 0 96 48 48 0 1 1 0-96z"/></svg>
+        Il passe !
+      </button>
+      <button id="btn-histo" class="btn btn-histo" type="button" aria-label="Statistiques de passage">
+        <svg class="btn-icon btn-icon--solo" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true"><path d="M32 32c17.7 0 32 14.3 32 32V400c0 8.8 7.2 16 16 16H480c17.7 0 32 14.3 32 32s-14.3 32-32 32H80c-44.2 0-80-35.8-80-80V64C0 46.3 14.3 32 32 32zM160 224c17.7 0 32 14.3 32 32v64c0 17.7-14.3 32-32 32s-32-14.3-32-32V256c0-17.7 14.3-32 32-32zm128-64V320c0 17.7-14.3 32-32 32s-32-14.3-32-32V160c0-17.7 14.3-32 32-32s32 14.3 32 32zm64 32c17.7 0 32 14.3 32 32v96c0 17.7-14.3 32-32 32s-32-14.3-32-32V224c0-17.7 14.3-32 32-32zM480 96V320c0 17.7-14.3 32-32 32s-32-14.3-32-32V96c0-17.7 14.3-32 32-32s32 14.3 32 32z"/></svg>
+      </button>
     </div>
   </section>
 
