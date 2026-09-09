@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .motion import TractionProfile
+from .osm import DEFAULT_LOOKAHEAD_M
 from .predict import Branch, Site
 from .realtime import SNCF_TRIP_UPDATES_URL
 
@@ -58,6 +59,8 @@ class AppConfig:
     data: DataPaths = field(default_factory=DataPaths)
     sensor: SensorSettings = field(default_factory=SensorSettings)
     search_radius_m: float = 400.0
+    branch_lookahead_m: float = DEFAULT_LOOKAHEAD_M
+    """Portée de visée au-delà du point, pour distinguer les branches."""
 
 
 def _require(table: dict[str, Any], key: str, where: str) -> Any:
@@ -91,7 +94,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path | None = None) -> AppConfig
             label=str(table.get("label", table["id"])),
             bearing_deg=float(_require(table, "bearing_deg", "branches")),
             passes_observer=bool(table.get("passes_observer", True)),
-            tolerance_deg=float(table.get("tolerance_deg", 40.0)),
+            tolerance_deg=float(table.get("tolerance_deg", 30.0)),
             track_distance_m=(
                 float(table["track_distance_m"]) if "track_distance_m" in table else None
             ),
@@ -151,6 +154,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path | None = None) -> AppConfig
         data=data,
         sensor=sensor,
         search_radius_m=float(site_table.get("search_radius_m", 400.0)),
+        branch_lookahead_m=float(site_table.get("branch_lookahead_m", DEFAULT_LOOKAHEAD_M)),
     )
 
 

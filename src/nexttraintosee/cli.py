@@ -93,58 +93,87 @@ def _collect_passages(
 
 
 def suggest_branches(config: AppConfig, corridors) -> list[tuple]:
-    """Associe chaque branche configurée au corridor qui lui correspond.
+    """Associe chaque branche configurée aux corridors qui lui correspondent.
 
     Une branche est définie par le cap sous lequel on quitte la gare d'appui ;
     un corridor sait vers où il part une fois passé le point d'observation. On
-    apparie les deux, et une branche sans corridor est une branche qui ne passe
-    pas devant le point.
+    apparie les deux.
+
+    Plusieurs corridors peuvent porter la même branche — c'est le cas courant
+    d'un faisceau où les voies d'une même ligne sont réparties de part et
+    d'autre : on les renvoie tous, ordonnés par proximité du point, plutôt que
+    d'en élire un arbitrairement.
 
     Returns:
-        Un couple (branche, corridor ou None, lien vers la gare ou None) par
-        branche configurée.
+        Un couple (branche, liste de (corridor, lien)) par branche configurée.
+        La liste est vide quand aucun corridor ne part dans cette direction.
     """
     anchor = config.site.anchor_position
     links = {}
     if anchor is not None:
-        links = {corridor.corridor_id: corridor.link_to(anchor) for corridor in corridors}
+        links = {
+            corridor.corridor_id: corridor.link_to(anchor, config.branch_lookahead_m)
+            for corridor in corridors
+        }
 
     suggestions = []
     for branch in config.site.branches:
-        best = None
+        matches = []
         for corridor in corridors:
             link = links.get(corridor.corridor_id)
             if link is None or link.outbound_bearing_deg is None:
                 continue
-            gap = bearing_distance_deg(branch.bearing_deg, link.outbound_bearing_deg)
-            if gap <= branch.tolerance_deg and (best is None or gap < best[0]):
-                best = (gap, corridor, link)
-        suggestions.append((branch, best[1] if best else None, best[2] if best else None))
+            if bearing_distance_deg(branch.bearing_deg, link.outbound_bearing_deg) <= branch.tolerance_deg:
+                matches.append((corridor, link))
+        # Le plus proche du point d'abord : c'est celui qu'on voit et qu'on entend.
+        matches.sort(key=lambda item: item[0].distance_m)
+        suggestions.append((branch, matches))
     return suggestions
 
 
 def render_branch_toml(suggestions) -> str:
     """Bloc TOML prêt à coller, déduit de la géométrie mesurée."""
     lines = []
-    for branch, corridor, link in suggestions:
+    for branch, matches in suggestions:
         lines.append("[[branches]]")
         lines.append(f'id = "{branch.branch_id}"')
         lines.append(f'label = "{branch.label}"')
         lines.append(f"bearing_deg = {branch.bearing_deg}")
-        if corridor is None:
-            lines.append("passes_observer = false   # aucun corridor ne part dans cette direction")
-        else:
-            lines.append("passes_observer = true")
-            if link is not None and link.is_plausible:
+        if not matches:
+            if branch.passes_observer:
+                # La géométrie ne voit rien partir par là, mais la configuration
+                # l'affirme : c'est souvent délibéré — une desserte dont le cap
+                # vers l'arrêt voisin ne reflète pas la direction de départ. On
+                # signale la contradiction sans effacer la décision humaine.
                 lines.append(
-                    f"track_distance_m = {link.along_distance_m:.0f}"
-                    f"   # corridor {corridor.corridor_id}, à {corridor.distance_m:.0f} m du point"
+                    "passes_observer = true    # à confirmer : aucun corridor ne part "
+                    "dans cette direction,"
+                )
+                lines.append(
+                    "                          # mais votre configuration l'affirme "
+                    "(cap trompeur ?)"
                 )
             else:
                 lines.append(
-                    f"# track_distance_m : non mesurable pour le corridor "
-                    f"{corridor.corridor_id} (géométrie incomplète)"
+                    "passes_observer = false   # aucun corridor ne part dans cette direction"
                 )
+            lines.append("")
+            continue
+
+        lines.append("passes_observer = true")
+        corridor, link = matches[0]
+        others = ", ".join(c.corridor_id for c, _ in matches[1:])
+        also = f" ; aussi {others}" if others else ""
+        if link.is_plausible:
+            lines.append(
+                f"track_distance_m = {link.along_distance_m:.0f}"
+                f"   # corridor {corridor.corridor_id}, à {corridor.distance_m:.0f} m du point{also}"
+            )
+        else:
+            lines.append(
+                f"# track_distance_m : non mesurable pour le corridor "
+                f"{corridor.corridor_id} (géométrie incomplète)"
+            )
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -159,6 +188,7 @@ def cmd_tracks(args: argparse.Namespace) -> int:
             radius_m=config.search_radius_m,
             refresh=args.refresh,
             anchor=config.site.anchor_position,
+            lookahead_m=config.branch_lookahead_m,
         )
     except OverpassError as exc:
         print(f"Overpass : {exc}", file=sys.stderr)
@@ -189,7 +219,7 @@ def cmd_tracks(args: argparse.Namespace) -> int:
         if anchor is None:
             print("      (renseignez anchor_lat / anchor_lon pour mesurer la distance à la gare)")
         else:
-            link = corridor.link_to(anchor)
+            link = corridor.link_to(anchor, config.branch_lookahead_m)
             if link.is_plausible:
                 heading = (
                     f", repart au cap {link.outbound_bearing_deg:.0f}°"
@@ -218,15 +248,16 @@ def cmd_tracks(args: argparse.Namespace) -> int:
     if anchor is not None:
         suggestions = suggest_branches(config, corridors)
         print("Correspondance branches ↔ corridors :\n")
-        for branch, corridor, link in suggestions:
-            if corridor is None:
-                print(f"  {branch.branch_id:8s} (cap {branch.bearing_deg:5.1f}°) → aucun corridor")
-            else:
-                heading = link.outbound_bearing_deg if link else None
+        for branch, matches in suggestions:
+            header = f"  {branch.branch_id:8s} (cap {branch.bearing_deg:5.1f}°) → "
+            if not matches:
+                print(header + "aucun corridor")
+                continue
+            print(header + f"{len(matches)} corridor(s)")
+            for corridor, link in matches:
                 print(
-                    f"  {branch.branch_id:8s} (cap {branch.bearing_deg:5.1f}°) → "
-                    f"{corridor.corridor_id} « {corridor.label} » "
-                    f"(repart au cap {heading:.0f}°)"
+                    f"      {corridor.corridor_id} à {corridor.distance_m:4.0f} m, "
+                    f"repart au cap {link.outbound_bearing_deg:3.0f}° · {corridor.label}"
                 )
         print("\nÀ recopier dans votre configuration, en remplacement de vos sections de branches :\n")
         print(render_branch_toml(suggestions))

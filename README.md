@@ -149,15 +149,26 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 191 tests, sans réseau).
+Le noyau est écrit et testé (`python -m pytest`, 195 tests, sans réseau), et la
+chaîne complète a tourné sur les données réelles : géométrie OpenStreetMap
+résolue, horaires SNCF chargés, retards temps réel appliqués.
 
-⚠️ **Une étape reste à faire chez vous** : la géométrie exacte des voies au
-droit du point n'a pas pu être vérifiée — l'environnement dans lequel ce code a
-été écrit n'a pas accès à Overpass ni à OpenStreetMap. Les valeurs
-`track_distance_m` et `passes_observer` de la configuration sont des
-**estimations** calculées à la table et marquées comme telles. `nexttraintosee
-tracks` les remplace par des valeurs mesurées ; voir
-[`docs/faisabilite.md`](docs/faisabilite.md#ce-qui-reste-à-vérifier).
+La configuration de Toulouse porte des **valeurs mesurées**, plus des
+estimations : 1 564 m par la voie jusqu'à Matabiau pour l'axe de Saint-Agne
+(dont les voies passent à 1 m du point), 1 565 m pour l'axe de Narbonne.
+
+### Un piège macOS
+
+Sur macOS, le fichier `.pth` de l'installation éditable se retrouve parfois
+marqué « hidden » par le système de fichiers — et **Python 3.13+ ignore
+délibérément les `.pth` cachés**. L'installation ne fait alors rien, sans le
+moindre message : `import nexttraintosee` échoue alors que `pip` a réussi.
+
+`scripts/bootstrap.sh` détecte et répare le cas. À la main :
+
+```bash
+chflags nohidden .venv/lib/python*/site-packages/*.pth
+```
 
 ## Licence
 

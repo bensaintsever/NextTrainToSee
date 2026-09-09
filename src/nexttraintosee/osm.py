@@ -21,6 +21,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -110,6 +111,11 @@ class RailStop:
 #: En deçà de cette distance de visée, la géométrie récupérée est trop courte
 #: pour dire vers où part le corridor.
 MIN_LOOKAHEAD_M = 250.0
+
+#: Distance de visée par défaut au-delà du point d'observation. Elle doit
+#: dépasser l'éloignement des bifurcations : tant que les lignes sont encore
+#: parallèles, rien ne les distingue.
+DEFAULT_LOOKAHEAD_M = 5000.0
 
 
 @dataclass(frozen=True)
@@ -424,10 +430,14 @@ def build_corridors(
             {w.osm_id: list(w.geometry) for w in usable if w.osm_id not in group_ids},
         )
         projection = project_on_polyline(point, centerline)
-        label = next(
-            (w.name for w in group_ways if w.name),
-            next((w.ref for w in group_ways if w.ref), f"corridor {index + 1}"),
-        )
+        # Dans un tronc commun, un même faisceau porte des voies de plusieurs
+        # lignes : les nommer toutes est plus juste que de retenir la première
+        # rencontrée, qui donnerait au corridor l'identité d'une seule.
+        names = Counter(w.name for w in group_ways if w.name)
+        if names:
+            label = " + ".join(name for name, _ in names.most_common(2))
+        else:
+            label = next((w.ref for w in group_ways if w.ref), f"corridor {index + 1}")
         corridors.append(
             Corridor(
                 corridor_id=f"c{index + 1}",
@@ -451,6 +461,7 @@ def build_query(
     include_service: bool = True,
     anchor: LatLon | None = None,
     anchor_corridor_m: float = 400.0,
+    lookahead_m: float = DEFAULT_LOOKAHEAD_M,
 ) -> str:
     """Construit la requête Overpass QL pour un point d'observation.
 
@@ -463,11 +474,23 @@ def build_query(
             polylignes s'arrêtent au bord du rayon de recherche et toute
             distance mesurée jusqu'à la gare est fausse.
         anchor_corridor_m: demi-largeur du couloir récupéré le long de ce segment.
+        lookahead_m: portée au-delà du point. Sans elle, la géométrie s'arrête
+            avant les bifurcations et tous les corridors semblent partir dans la
+            même direction — ce qui les rend indiscernables. Seules les lignes
+            (`usage=main|branch`) sont ramenées à cette distance, pour ne pas
+            aspirer tous les faisceaux de la ville.
     """
     lat, lon = point
     railway_filter = "|".join(MAIN_RAILWAY_VALUES)
     service_clause = "" if include_service else '["service"!~"."]'
     rail_clause = f'["railway"~"^({railway_filter})$"]{service_clause}'
+
+    lookahead_clause = ""
+    if lookahead_m > 0:
+        lookahead_clause = (
+            f"  way(around:{lookahead_m + 500:.0f},{lat:.6f},{lon:.6f})"
+            f'["railway"~"^({railway_filter})$"]["usage"~"^(main|branch)$"];\n'
+        )
 
     corridor_clause = ""
     station_radius = radius_m * 4
@@ -483,7 +506,7 @@ def build_query(
 [out:json][timeout:120];
 (
   way(around:{radius_m:.0f},{lat:.6f},{lon:.6f}){rail_clause};
-{corridor_clause}  node(around:{station_radius:.0f},{lat:.6f},{lon:.6f})["railway"~"^(station|halt)$"]["station"!~"^(subway|light_rail|monorail)$"];
+{corridor_clause}{lookahead_clause}  node(around:{station_radius:.0f},{lat:.6f},{lon:.6f})["railway"~"^(station|halt)$"]["station"!~"^(subway|light_rail|monorail)$"];
 );
 out tags geom;
 """.strip()
@@ -553,9 +576,10 @@ class OverpassClient:
         radius_m: float = 400.0,
         refresh: bool = False,
         anchor: LatLon | None = None,
+        lookahead_m: float = DEFAULT_LOOKAHEAD_M,
     ) -> tuple[list[RailWay], list[RailStop]]:
         """Récupère voies et gares autour d'un point, et jusqu'à la gare d'appui."""
-        query = build_query(point, radius_m, anchor=anchor)
+        query = build_query(point, radius_m, anchor=anchor, lookahead_m=lookahead_m)
         return parse_overpass(self.query(query, refresh=refresh))
 
 

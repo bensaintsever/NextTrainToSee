@@ -1,8 +1,8 @@
 # Point d'observation : 43°35'52.2"N 1°27'29.5"E
 #
-# `nexttraintosee tracks -c config/toulouse-guilhemery.toml` mesure la géométrie
-# réelle sur OpenStreetMap et imprime le bloc [[branches]] à recopier ici.
-# Les valeurs ci-dessous marquées « À MESURER » sont des estimations en attendant.
+# Valeurs mesurées sur OpenStreetMap le 9 septembre 2026 par
+# `nexttraintosee tracks -c config/toulouse-guilhemery.toml`, qui imprime le
+# bloc [[branches]] à recopier ici.
 #
 # Géographie du secteur : au sud de Matabiau, toutes les lignes descendent
 # ensemble sur environ deux kilomètres avant de se séparer aux bifurcations du
@@ -38,14 +38,16 @@ id = "se"
 label = "Axe Narbonne / Sète (via Montaudran)"
 bearing_deg = 137.5
 passes_observer = true
-track_distance_m = 1650.0   # À MESURER (estimation : 1534 m à vol d'oiseau × sinuosité)
+# Corridor c2, à 383 m du point (un second, c3, à 488 m, porte le même axe).
+track_distance_m = 1565.0
 
 [[branches]]
 id = "sud"
 label = "Axe Latour-de-Carol / Bayonne / Auch (via Saint-Agne)"
 bearing_deg = 184.2
 passes_observer = true
-track_distance_m = 1600.0   # À MESURER
+# Corridor c1, à 1 m du point : les voies passent au ras de la position.
+track_distance_m = 1564.0
 
 [[branches]]
 id = "nord"
@@ -62,8 +64,11 @@ bearing_deg = 269.8
 # descend d'abord avec les autres, bifurque vers l'ouest après Saint-Agne, puis
 # remonte vers Saint-Cyprien-Arènes et Colomiers. Une desserte directe
 # Matabiau -> Colomiers donne donc un cap de 270° tout en passant devant le point.
+# `tracks` ne trouve aucun corridor à ce cap, et c'est attendu : la géométrie ne
+# peut pas savoir qu'une desserte annoncée vers l'ouest part en réalité au sud.
+# Le maintien à true est donc une décision, pas un oubli.
 passes_observer = true
-track_distance_m = 1600.0   # À MESURER — même tronc commun que la branche « sud »
+track_distance_m = 1564.0   # même tronc commun que la branche « sud »
 
 [data]
 gtfs_path = "../data/sncf-gtfs.zip"

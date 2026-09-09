@@ -58,6 +58,25 @@ else
     python -m pip install --quiet -e ".[realtime]"
 fi
 
+# --- 3 bis. Vérification que l'installation éditable fonctionne --------------
+
+# Sur macOS, le fichier .pth de l'installation éditable se retrouve parfois
+# marqué « hidden » par le système de fichiers. Python 3.13+ ignore
+# délibérément les .pth cachés : l'installation ne fait alors strictement rien,
+# sans le moindre message, et la commande reste introuvable.
+if ! python -c "import nexttraintosee" >/dev/null 2>&1; then
+    if [ "$(uname)" = "Darwin" ]; then
+        warn "installation éditable inopérante ; retrait du flag « hidden » sur les .pth"
+        chflags nohidden "$VENV"/lib/python*/site-packages/*.pth 2>/dev/null || true
+    fi
+    if ! python -c "import nexttraintosee" >/dev/null 2>&1; then
+        echo "Le paquet reste introuvable après installation." >&2
+        echo "Contournement : PYTHONPATH=src python -m nexttraintosee.cli --help" >&2
+        exit 1
+    fi
+    echo "  installation réparée"
+fi
+
 # --- 4. Horaires théoriques --------------------------------------------------
 
 mkdir -p data

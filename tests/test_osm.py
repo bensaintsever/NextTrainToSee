@@ -129,6 +129,20 @@ def test_corridor_label_prefers_the_line_name():
     assert build_corridors(ways, POINT)[0].label == "Ligne de Bordeaux à Sète"
 
 
+def test_corridor_label_names_every_line_of_a_shared_trunk():
+    # Dans un tronc commun, un faisceau porte des voies de plusieurs lignes :
+    # n'en nommer qu'une donnerait au corridor une identité trompeuse.
+    ways = [
+        _way(1, _line(60, 0), name="Ligne de Bordeaux à Sète"),
+        _way(2, _line(64, 0), name="Ligne de Bordeaux à Sète"),
+        _way(3, _line(68, 0), name="Ligne de Toulouse à Bayonne"),
+    ]
+    label = build_corridors(ways, POINT)[0].label
+    assert "Sète" in label and "Bayonne" in label
+    # La ligne la plus représentée vient en premier.
+    assert label.index("Sète") < label.index("Bayonne")
+
+
 def test_corridor_reports_the_highest_track_speed():
     ways = [_way(1, _line(60, 0), maxspeed="90"), _way(2, _line(68, 0), maxspeed="110")]
     assert build_corridors(ways, POINT)[0].maxspeed_kmh == 110.0

@@ -40,12 +40,26 @@ c'est aussi ce qui rend indispensable l'étape `tracks` : selon que le point est
 à 80 m d'un seul axe ou à mi-distance des deux, la configuration n'est pas la
 même.
 
-### Ce que la géométrie OSM a confirmé
+### Ce que la géométrie OSM a mesuré
 
-Une exécution de `tracks` sur le terrain relève **trois corridors parallèles**
-dans un rayon de 500 m — à 1 m, 383 m et 488 m du point, tous orientés
-nord-sud, tous limités à 120 km/h — nommés « Ligne de Bordeaux-Saint-Jean à
-Sète-Ville » et « Ligne de Toulouse à Bayonne ».
+`tracks` relève **trois corridors parallèles** dans un rayon de 500 m — à 1 m,
+383 m et 488 m du point, tous orientés nord-sud, tous limités à 120 km/h.
+
+| Corridor | Distance | Repart au cap | Ce qu'il porte |
+| --- | ---: | ---: | --- |
+| c1 | **1 m** | 207° (sud-ouest) | Latour-de-Carol, Bayonne, Auch — via Saint-Agne |
+| c2 | 383 m | 146° (sud-est) | Narbonne, Sète |
+| c3 | 488 m | 146° (sud-est) | Narbonne, Sète |
+
+Distance par la voie jusqu'à Matabiau : **1 562 à 1 565 m** selon le corridor,
+pour 1 534 m à vol d'oiseau. Les trois valeurs tiennent dans 3 mètres : le choix
+du corridor est donc sans effet sur la prédiction, seul compte de savoir si la
+branche passe ou non.
+
+Chaque corridor mêle des voies **des deux lignes** : à cet endroit elles
+partagent la même tranchée, voie contre voie. C'est pourquoi l'outil nomme un
+corridor par toutes les lignes qu'il porte, et se fie au cap de sortie — mesuré
+5 km plus loin, après les bifurcations — plutôt qu'au nom d'une voie.
 
 C'est cohérent avec la description du réseau : au sud de Matabiau, la ligne de
 Saint-Agne à Auch « descend vers le sud sur environ deux kilomètres aux côtés
@@ -182,8 +196,8 @@ du temps en aval sans que cela change son heure de passage ici.
 
 | Source d'erreur | Ordre de grandeur | Réductible ? |
 | --- | ---: | --- |
-| Modèle de marche (accélération, vitesse réelle) | ±15 s | **oui** — par recalage capteur |
-| Distance gare → point (si estimée à vol d'oiseau) | ±10 s | **oui** — par `tracks` (géométrie OSM) |
+| Modèle de marche (accélération, vitesse réelle) | ±13 s *(mesuré)* | **oui** — par recalage capteur |
+| Distance gare → point | ±0 s — **mesurée** à 1 564 m | fait |
 | Fraîcheur du temps réel (flux à 2 min) | ±5 à 30 s | non |
 | Arrondi des horaires GTFS à la minute | ±30 s | partiellement, via le temps réel |
 | Voie empruntée dans le faisceau | ±2 s | négligeable |

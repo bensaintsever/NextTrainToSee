@@ -60,8 +60,14 @@ class Branch:
     """Cap moyen, depuis la gare d'appui, des gares situées sur cette branche."""
     passes_observer: bool = True
     """Faux pour une branche qui s'éloigne sans passer devant le point."""
-    tolerance_deg: float = 40.0
-    """Demi-ouverture du secteur angulaire attribué à la branche."""
+    tolerance_deg: float = 30.0
+    """Demi-ouverture du secteur angulaire attribué à la branche.
+
+    Trop large, deux branches divergentes se recouvrent ; trop étroite, une
+    desserte dont l'arrêt voisin est légèrement décalé n'est plus rattachée.
+    Trente degrés séparent proprement des axes distants d'une soixantaine de
+    degrés, ce qui est le cas courant en sortie de gare.
+    """
     track_distance_m: float | None = None
     """Distance curviligne gare d'appui -> point, mesurée sur la géométrie OSM."""
     line_speed_kmh: float | None = None

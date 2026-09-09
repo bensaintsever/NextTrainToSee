@@ -349,16 +349,37 @@ def test_tracks_measures_the_distance_along_the_track(tracks_config, capsys):
     assert "non mesurable" not in out
 
 
+def _mapping_blocks(output: str) -> dict[str, list[str]]:
+    """Découpe la section « Correspondance » en un bloc de lignes par branche."""
+    section = output[output.index("Correspondance branches") : output.index("À recopier")]
+    blocks: dict[str, list[str]] = {}
+    current = None
+    for line in section.splitlines():
+        if "(cap" in line:
+            current = line.strip().split()[0]
+            blocks[current] = []
+        elif current and line.strip().startswith("c"):
+            blocks[current].append(line)
+    return blocks
+
+
 def test_tracks_maps_each_branch_to_its_corridor(tracks_config, capsys):
     assert run(tracks_config, "tracks") == 0
-    out = capsys.readouterr().out
+    blocks = _mapping_blocks(capsys.readouterr().out)
 
-    mapping = out[out.index("Correspondance branches") :]
-    se_line = next(l for l in mapping.splitlines() if l.strip().startswith("se "))
-    sud_line = next(l for l in mapping.splitlines() if l.strip().startswith("sud "))
+    assert "Sète-Ville" in "".join(blocks["se"])
+    assert "Bayonne" in "".join(blocks["sud"])
+    # Les axes nord et ouest n'existent pas dans ce jeu de données.
+    assert blocks["nord"] == []
 
-    assert "Sète-Ville" in se_line
-    assert "Bayonne" in sud_line
+
+def test_tracks_lists_every_corridor_carrying_a_branch(tracks_config, capsys):
+    # Un axe peut être porté par plusieurs faisceaux : il faut tous les voir,
+    # pas seulement le premier.
+    assert run(tracks_config, "tracks") == 0
+    blocks = _mapping_blocks(capsys.readouterr().out)
+    assert len(blocks["se"]) >= 1
+    assert all("repart au cap" in line for line in blocks["se"])
 
 
 def test_tracks_emits_a_ready_to_paste_toml_block(tracks_config, capsys):
@@ -402,3 +423,33 @@ def test_tracks_reports_when_no_track_is_near(tmp_path, gtfs_zip, capsys):
 
     assert run(path, "tracks") == 1
     assert "Aucune voie ferrée" in capsys.readouterr().out
+
+
+def test_toml_keeps_a_manual_passes_observer_but_flags_it():
+    # Une desserte peut passer devant le point sans qu'aucun corridor ne parte
+    # dans la direction de son arrêt voisin — c'est le cas des trains de
+    # Colomiers, annoncés à l'ouest mais partant au sud. L'outil ne doit pas
+    # effacer cette décision humaine, seulement la signaler.
+    from nexttraintosee.cli import render_branch_toml
+    from nexttraintosee.predict import Branch
+
+    visible = Branch("ouest", "Axe Colomiers", bearing_deg=269.8, passes_observer=True)
+    hidden = Branch("nord", "Axe Bordeaux", bearing_deg=348.6, passes_observer=False)
+
+    block = render_branch_toml([(visible, []), (hidden, [])])
+
+    assert "passes_observer = true" in block and "à confirmer" in block
+    assert "passes_observer = false" in block
+
+
+def test_toml_stays_parseable_when_branches_are_flagged():
+    import tomllib
+
+    from nexttraintosee.cli import render_branch_toml
+    from nexttraintosee.predict import Branch
+
+    block = render_branch_toml(
+        [(Branch("ouest", "Axe Colomiers", bearing_deg=269.8, passes_observer=True), [])]
+    )
+    parsed = tomllib.loads(block)
+    assert parsed["branches"][0]["passes_observer"] is True
