@@ -15,12 +15,12 @@ d'accueil, fond `assets/toulouse.jpg` plein écran, surcouches vivantes.
    `monospace` obligatoire).
 2. Zone haute (ciel) : heure du prochain passage en très grand, `±Ns`,
    compte à rebours « guette dès HH:MM:SS » piloté par `announce_at`,
-   direction avec flèche et libellé (« ▼ From Matabiau · il sort du tunnel » /
-   « ▲ To Matabiau · il arrive du sud »), n° et destination du train, badge
+   direction avec flèche et libellé (« ▼ Depuis Matabiau · il sort du tunnel » /
+   « ▲ Vers Matabiau · il arrive du sud »), n° et destination du train, badge
    « TR » ou « horaire théorique » selon `realtime`, retard s'il existe
    (`+5 min`). État « imminent » (pulsation discrète) entre
    `announce_at - 30 s` et `when + uncertainty_s`.
-3. Zone basse (voie) : passage suivant en petit (« puis 23:02 · To Matabiau »),
+3. Zone basse (voie) : passage suivant en petit (« puis 23:02 · Vers Matabiau »),
    bouton « 🚆 Il passe ! », bouton « 📊 ».
 4. Observation (§ 6, à la lettre) : appui « Il passe ! » → POST immédiat,
    retour visuel (confirmation, `bound_to`/`ambiguous`) ; carte « le train de

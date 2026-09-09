@@ -37,7 +37,7 @@ assumé pour la v0.
 
 - Site unique : Toulouse (`config/toulouse-guilhemery.toml`).
 - Prochain passage en grand, le suivant en petit dessous.
-- Direction : « From Matabiau » / « To Matabiau », avec le côté où regarder.
+- Direction : « Depuis Matabiau » / « Vers Matabiau », avec le côté où regarder.
 - Journalisation des passages : vu / non vu / heure réelle (cf. § 6).
 - Bouton ouvrant une bottom sheet avec l'histogramme semaine / week-end.
 - Fond d'écran : `webapp/assets/toulouse.jpg` (1205×2160), l'heure apposée dessus.
@@ -56,7 +56,7 @@ y est calme :
 ┌─────────────────────────┐
 │  ZONE HAUTE (le ciel)   │  heure du prochain passage, très grande,
 │  22:47:43   ±20 s       │  police pixel ; dessous : compte à rebours
-│  ▼ From Matabiau        │  « guette dès HH:MM:SS » + direction + n° train
+│  ▼ Depuis Matabiau        │  « guette dès HH:MM:SS » + direction + n° train
 ├─────────────────────────┤
 │                         │
 │   (illustration libre : │
@@ -73,9 +73,9 @@ y est calme :
   doit rester lisible sans réseau vers Google.
 - Lisibilité sur image : textes blancs, `text-shadow` net + léger bandeau
   `rgba(0,0,0,.35)` derrière les blocs.
-- Direction (cf. § 5) : « From Matabiau » s'accompagne de « ▼ il sort du
+- Direction (cf. § 5) : « Depuis Matabiau » s'accompagne de « ▼ il sort du
   tunnel » (le tunnel est en haut de l'illustration, côté Matabiau) ;
-  « To Matabiau » de « ▲ il arrive du sud, derrière toi ».
+  « Vers Matabiau » de « ▲ il arrive du sud, derrière toi ».
 - Compte à rebours piloté par `announce_at`, pas par `when` : annoncer tard
   fait rater le train, annoncer tôt ne coûte rien. Quand
   `now ≥ announce_at - 30 s`, la zone haute passe en état « imminent »
@@ -105,7 +105,7 @@ Toutes les réponses en JSON UTF-8, dates en ISO 8601 avec fuseau.
       "announce_at": "2026-09-09T22:47:10+02:00",
       "uncertainty_s": 20.0,
       "direction": "outbound",
-      "direction_label": "From Matabiau",
+      "direction_label": "Depuis Matabiau",
       "look": "tunnel",
       "branch_id": "se",
       "branch_label": "Axe Narbonne / Sète (via Montaudran)",
@@ -120,7 +120,7 @@ Toutes les réponses en JSON UTF-8, dates en ISO 8601 avec fuseau.
 }
 ```
 
-- `direction_label` : `outbound` → « From Matabiau », `inbound` → « To Matabiau ».
+- `direction_label` : `outbound` → « Depuis Matabiau », `inbound` → « Vers Matabiau ».
 - `look` : `outbound` → `"tunnel"`, `inbound` → `"sud"`. Le client n'infère
   rien : le serveur donne les libellés.
 - `realtime` (par passage) : vrai si `delay_s` n'est pas null. Au niveau
@@ -188,8 +188,8 @@ Le point d'observation est au sud de Matabiau, sur le tronc commun.
 
 | `direction` | Sens physique | Libellé | D'où le train surgit |
 |---|---|---|---|
-| `outbound` | s'éloigne de Matabiau vers le sud | **From Matabiau** | du tunnel (nord) |
-| `inbound` | remonte vers Matabiau | **To Matabiau** | du sud |
+| `outbound` | s'éloigne de Matabiau vers le sud | **Depuis Matabiau** | du tunnel (nord) |
+| `inbound` | remonte vers Matabiau | **Vers Matabiau** | du sud |
 
 ## 6. Journalisation des passages — règles anti-biais
 

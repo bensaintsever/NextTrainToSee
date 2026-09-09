@@ -120,10 +120,10 @@ def test_next_route_computes_direction_label_and_look_server_side(running_server
     _, payload = _get_json(running_server, "/api/next?limit=10")
     for passage in payload["passages"]:
         if passage["direction"] == "outbound":
-            assert passage["direction_label"] == "From Matabiau"
+            assert passage["direction_label"] == "Depuis Matabiau"
             assert passage["look"] == "tunnel"
         else:
-            assert passage["direction_label"] == "To Matabiau"
+            assert passage["direction_label"] == "Vers Matabiau"
             assert passage["look"] == "sud"
 
 

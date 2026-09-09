@@ -99,11 +99,11 @@ def test_direction_label_and_look_are_computed_server_side(service: PassageServi
 
     by_direction = {p["direction"]: p for p in response["passages"]}
     assert "outbound" in by_direction
-    assert by_direction["outbound"]["direction_label"] == "From Matabiau"
+    assert by_direction["outbound"]["direction_label"] == "Depuis Matabiau"
     assert by_direction["outbound"]["look"] == "tunnel"
 
     assert "inbound" in by_direction
-    assert by_direction["inbound"]["direction_label"] == "To Matabiau"
+    assert by_direction["inbound"]["direction_label"] == "Vers Matabiau"
     assert by_direction["inbound"]["look"] == "sud"
 
 

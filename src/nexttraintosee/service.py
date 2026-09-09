@@ -47,8 +47,8 @@ DEFAULT_OBSERVE_TOLERANCE_S = 180.0
 #: Libellés de direction et indication d'où regarder, figés par le contrat
 #: (§ 5 de `docs/app-v0.md`) : le client ne les infère pas, le serveur les donne.
 _DIRECTION_LABELS = {
-    Direction.OUTBOUND: "From Matabiau",
-    Direction.INBOUND: "To Matabiau",
+    Direction.OUTBOUND: "Depuis Matabiau",
+    Direction.INBOUND: "Vers Matabiau",
 }
 _LOOK = {
     Direction.OUTBOUND: "tunnel",
