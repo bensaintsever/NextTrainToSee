@@ -94,6 +94,16 @@ def _post_json(server, path: str, payload) -> tuple[int, dict]:
         conn.close()
 
 
+def _delete_json(server, path: str) -> tuple[int, dict]:
+    conn = _connection(server)
+    try:
+        conn.request("DELETE", path)
+        response = conn.getresponse()
+        return response.status, json.loads(response.read().decode("utf-8"))
+    finally:
+        conn.close()
+
+
 # -- /api/next -------------------------------------------------------------------
 
 
@@ -172,6 +182,39 @@ def test_observe_route_binds_a_seen_passage(running_server):
     assert payload["recorded"] is True
     assert payload["ambiguous"] is False
     assert payload["bound_to"]["trip_id"] == next_payload["passages"][0]["trip_id"]
+    assert isinstance(payload["id"], int)
+
+
+def test_observe_route_can_be_undone(running_server):
+    # Le scénario réel qui a motivé la fonctionnalité : un appui accidentel sur
+    # « Il passe ! », sans aucun moyen d'y revenir.
+    status, payload = _post_json(
+        running_server, "/api/observe", {"seen": True, "observed_at": "2026-09-09T08:00:00+02:00"}
+    )
+    assert status == 200
+    observation_id = payload["id"]
+
+    status, deletion = _delete_json(running_server, f"/api/observe/{observation_id}")
+    assert status == 200
+    assert deletion["deleted"] is True
+
+    # Un « Annuler » relancé deux fois (double appui, latence réseau) ne doit
+    # jamais échouer : la seconde suppression est simplement sans effet.
+    status, second = _delete_json(running_server, f"/api/observe/{observation_id}")
+    assert status == 200
+    assert second["deleted"] is False
+
+
+def test_observe_route_rejects_deleting_an_unknown_id(running_server):
+    status, payload = _delete_json(running_server, "/api/observe/999999")
+    assert status == 200
+    assert payload["deleted"] is False
+
+
+def test_observe_route_rejects_a_non_numeric_deletion_id(running_server):
+    status, payload = _delete_json(running_server, "/api/observe/pas-un-nombre")
+    assert status == 400
+    assert "error" in payload
 
 
 def test_observe_route_accepts_a_not_seen_report(running_server):

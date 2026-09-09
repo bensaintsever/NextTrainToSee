@@ -160,7 +160,8 @@ Corps, deux formes :
 Réponse :
 
 ```json
-{ "recorded": true, "bound_to": { "trip_id": "…", "when": "…", "headsign": "…" },
+{ "recorded": true, "id": 42,
+  "bound_to": { "trip_id": "…", "when": "…", "headsign": "…" },
   "ambiguous": false, "gap_s": 8.0 }
 ```
 
@@ -169,6 +170,26 @@ commande (module partagé, cf. ticket 01) : rattachement au passage prédit le
 plus proche, **refusé quand deux candidats sont à portée comparable**
 (`ambiguous: true`, `bound_to: null`) — une observation mal attribuée fausse le
 recalage bien plus qu'une observation ignorée.
+
+`id` identifie la ligne enregistrée, y compris quand `ambiguous` est vrai —
+l'observation est toujours conservée, seul son rattachement à une circulation
+précise est refusé. Le client s'en sert pour permettre d'y revenir (§ 6) :
+sans cela, un appui accidentel sur « Il passe ! » n'a aucun rattrapage possible.
+
+### DELETE /api/observe/{id}
+
+Annule une observation, par exemple pendant la fenêtre de « Annuler » qui suit
+un appui sur « Il passe ! ». Sans corps.
+
+Réponse :
+
+```json
+{ "deleted": true }
+```
+
+`deleted: false` pour un identifiant inconnu, déjà supprimé, ou appartenant à
+un autre site — jamais une erreur : un « Annuler » relancé deux fois doit
+rester sans effet, pas échouer.
 
 ### GET /api/health
 
@@ -196,7 +217,7 @@ Le point d'observation est au sud de Matabiau, sur le tronc commun.
 Elles découlent de l'analyse faite en amont (voir historique du dépôt) et ne
 sont pas négociables en v0 :
 
-1. **Le bouton « 🚆 Il passe ! » est l'instrument principal.** Un appui au
+1. **Le bouton « Il passe ! » est l'instrument principal.** Un appui au
    moment du passage = `seen`, `observed_at = maintenant`, `precision_s = 3`.
    C'est la donnée la plus précise qu'un humain puisse fournir.
 2. **Après** `when + uncertainty_s + 90 s`, si aucun appui n'a eu lieu, une
@@ -210,6 +231,11 @@ sont pas négociables en v0 :
      succès.
 3. La carte concerne le dernier passage écoulé uniquement, et disparaît
    d'elle-même après 10 minutes.
+4. **Toute observation envoyée reste réversible quelques secondes.** Un appui
+   accidentel est une source d'erreur réelle (constatée : un « Il passe ! »
+   pressé par erreur en testant l'app), et il n'y a aucun moyen de distinguer
+   côté serveur une vraie observation d'un test. Le toast de confirmation porte
+   donc un bouton « Annuler » qui appelle `DELETE /api/observe/{id}` — voir § 4.
 
 ## 7. Histogramme (bottom sheet)
 

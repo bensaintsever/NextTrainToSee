@@ -359,17 +359,56 @@ function tick() {
 // ---------------------------------------------------------------------------
 
 const toastEl = document.getElementById('toast');
+const toastTextEl = document.getElementById('toast-text');
+const toastActionEl = document.getElementById('toast-action');
 let toastTimer = null;
 
-function showToast(text) {
+// Une observation qui porte une action reste affichée plus longtemps : le
+// temps de lire, comprendre qu'on peut annuler, et le faire — 3,2 s suffit à
+// un message qui ne demande qu'à être lu, pas à celui qui appelle à agir.
+const TOAST_DEFAULT_MS = 3200;
+const TOAST_ACTION_MS = 6000;
+
+/** @param {string} text
+ *  @param {{label: string, onClick: () => void} | null} [action] */
+function showToast(text, action = null) {
   clearTimeout(toastTimer);
-  toastEl.textContent = text;
+  toastTextEl.textContent = text;
+  toastEl.classList.toggle('with-action', Boolean(action));
+
+  if (action) {
+    toastActionEl.hidden = false;
+    toastActionEl.disabled = false;
+    toastActionEl.textContent = action.label;
+    toastActionEl.onclick = () => {
+      // Synchrone, avant tout await : un second appui pendant l'annulation en
+      // cours ne doit pas déclencher une seconde suppression.
+      toastActionEl.disabled = true;
+      action.onClick();
+    };
+  } else {
+    toastActionEl.hidden = true;
+    toastActionEl.onclick = null;
+  }
+
   toastEl.hidden = false;
   requestAnimationFrame(() => toastEl.classList.add('show'));
   toastTimer = setTimeout(() => {
     toastEl.classList.remove('show');
     setTimeout(() => { toastEl.hidden = true; }, 300);
-  }, 3200);
+  }, action ? TOAST_ACTION_MS : TOAST_DEFAULT_MS);
+}
+
+/** Annule une observation envoyée par erreur (§ 6) : la seule protection
+ *  contre un appui accidentel sur « Il passe ! », qu'aucun serveur ne peut
+ *  distinguer d'une vraie observation une fois reçue. */
+async function undoObservation(id) {
+  try {
+    const res = await fetchJson(`/api/observe/${id}`, { method: 'DELETE' });
+    showToast(res.deleted ? '↩ Passage annulé' : '↩ Déjà annulé');
+  } catch (err) {
+    showToast('📡 Hors-ligne : annulation impossible');
+  }
 }
 
 // 1. Le bouton « Il passe ! » est l'instrument principal : appui → POST
@@ -385,12 +424,13 @@ async function onSeenClick() {
 
   try {
     const res = await postObserve(body);
+    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
     if (res.ambiguous) {
-      showToast('⚠️ Passage ambigu : non enregistré');
+      showToast('⚠️ Passage ambigu : non enregistré', undo);
     } else if (res.recorded && res.bound_to) {
-      showToast(`✓ Passage de ${fmtHM(res.bound_to.when)} enregistré`);
+      showToast(`✓ Passage de ${fmtHM(res.bound_to.when)} enregistré`, undo);
     } else {
-      showToast('✓ Passage enregistré');
+      showToast('✓ Passage enregistré', undo);
     }
   } catch (err) {
     showToast('📡 Hors-ligne : passage non envoyé');
@@ -448,7 +488,8 @@ async function onConfirmYes() {
     const res = await postObserve({
       seen: true, observed_at: p.when, precision_s: 60, source: 'app',
     });
-    showToast(res.recorded ? '✓ Merci, c\'est noté' : '✓ Réponse envoyée');
+    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
+    showToast(res.recorded ? '✓ Merci, c\'est noté' : '✓ Réponse envoyée', undo);
   } catch (err) {
     showToast('📡 Hors-ligne : réponse non envoyée');
   }
@@ -492,7 +533,8 @@ async function onManualSubmit() {
     const res = await postObserve({
       seen: true, observed_at: toIsoLocal(observed), precision_s: 30, source: 'app',
     });
-    showToast(res.recorded ? '✓ Heure enregistrée' : '✓ Réponse envoyée');
+    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
+    showToast(res.recorded ? '✓ Heure enregistrée' : '✓ Réponse envoyée', undo);
   } catch (err) {
     showToast('📡 Hors-ligne : réponse non envoyée');
   }
@@ -505,7 +547,8 @@ async function onManualNotPassed() {
   closeSheet(manualSheetEl, manualBackdropEl);
   try {
     const res = await postObserve({ seen: false, anchor: p.when, source: 'app' });
-    showToast(res.recorded ? '✓ Noté : non passé' : '✓ Réponse envoyée');
+    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
+    showToast(res.recorded ? '✓ Noté : non passé' : '✓ Réponse envoyée', undo);
   } catch (err) {
     showToast('📡 Hors-ligne : réponse non envoyée');
   }

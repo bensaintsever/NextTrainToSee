@@ -249,9 +249,13 @@ class Store:
             )
         return passages
 
-    def record_observation(self, site: str, observation: Observation) -> None:
-        """Enregistre un passage rapporté."""
-        self.connection.execute(
+    def record_observation(self, site: str, observation: Observation) -> int:
+        """Enregistre un passage rapporté et renvoie son identifiant.
+
+        L'identifiant permet à l'appelant (l'application) de revenir sur une
+        observation qu'il vient d'envoyer par erreur — voir `delete_observation`.
+        """
+        cursor = self.connection.execute(
             """
             INSERT INTO observations
                 (site, observed_at, kind, source, trip_id, direction,
@@ -272,6 +276,28 @@ class Store:
             ),
         )
         self.connection.commit()
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def delete_observation(self, site: str, observation_id: int) -> bool:
+        """Supprime une observation rapportée par erreur.
+
+        Sert le « Annuler » qui suit un appui accidentel sur « Il passe ! » :
+        une fenêtre de quelques secondes pendant laquelle revenir en arrière,
+        plutôt que de polluer silencieusement le recalage du modèle avec une
+        donnée que personne n'a réellement observée.
+
+        Returns:
+            Vrai si une ligne a été supprimée. Faux si l'identifiant est
+            inconnu, déjà supprimé, ou appartient à un autre site — jamais une
+            erreur : un « Annuler » relancé deux fois doit rester sans effet,
+            pas échouer.
+        """
+        cursor = self.connection.execute(
+            "DELETE FROM observations WHERE id = ? AND site = ?", (observation_id, site)
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
 
     def observations_between(
         self, site: str, start: datetime, end: datetime

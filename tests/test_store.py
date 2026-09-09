@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from nexttraintosee.motion import Regime
+from nexttraintosee.observation import Observation
 from nexttraintosee.predict import Branch, Direction, Passage
 from nexttraintosee.sensor.base import Detection
 from nexttraintosee.store import Store
@@ -128,3 +129,47 @@ def test_the_store_reopens_an_existing_database(tmp_path):
         first.record_detection(SITE, detection(0))
     with Store(path) as second:
         assert second.counts(SITE) == (1, 0)
+
+
+# -- observations (rapports capteur ou humains) -----------------------------------
+
+
+def test_record_observation_returns_a_usable_id(store):
+    observation_id = store.record_observation(SITE, Observation(NOON, precision_s=3.0, source="app"))
+    assert isinstance(observation_id, int)
+
+
+def test_delete_observation_removes_the_matching_row(store):
+    observation_id = store.record_observation(SITE, Observation(NOON, source="app"))
+    assert store.delete_observation(SITE, observation_id) is True
+    remaining = store.observations_between(SITE, NOON - timedelta(hours=1), NOON + timedelta(hours=1))
+    assert remaining == []
+
+
+def test_delete_observation_a_second_time_is_a_no_op(store):
+    observation_id = store.record_observation(SITE, Observation(NOON, source="app"))
+    assert store.delete_observation(SITE, observation_id) is True
+    assert store.delete_observation(SITE, observation_id) is False
+
+
+def test_delete_observation_rejects_an_unknown_id(store):
+    assert store.delete_observation(SITE, 999_999) is False
+
+
+def test_delete_observation_is_scoped_to_its_site(store):
+    # Une observation d'un autre site ne doit pas pouvoir être supprimée en
+    # passant simplement un identifiant : l'isolation entre sites tenue
+    # ailleurs (detections, predictions) doit tenir aussi ici.
+    observation_id = store.record_observation("un autre site", Observation(NOON, source="app"))
+    assert store.delete_observation(SITE, observation_id) is False
+    assert store.delete_observation("un autre site", observation_id) is True
+
+
+def test_deleting_one_observation_leaves_others_untouched(store):
+    store.record_observation(SITE, Observation(NOON, source="app"))
+    removed_id = store.record_observation(SITE, Observation(NOON + timedelta(minutes=5), source="app"))
+    store.delete_observation(SITE, removed_id)
+
+    remaining = store.observations_between(SITE, NOON - timedelta(hours=1), NOON + timedelta(hours=1))
+    assert len(remaining) == 1
+    assert remaining[0].observed_at == NOON

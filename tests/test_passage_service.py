@@ -213,6 +213,7 @@ def test_observe_binds_a_seen_passage_to_the_nearest_prediction(service: Passage
     assert result["bound_to"] is not None
     assert result["bound_to"]["trip_id"] == predicted[0]["trip_id"]
     assert result["gap_s"] == pytest.approx(12.0, abs=0.5)
+    assert isinstance(result["id"], int)
 
 
 def test_observe_leaves_an_ambiguous_observation_unbound(
@@ -254,6 +255,30 @@ def test_observe_rejects_a_body_missing_the_seen_field(service: PassageService):
 def test_observe_rejects_a_seen_body_without_observed_at(service: PassageService):
     with pytest.raises(ValueError):
         service.observe({"seen": True})
+
+
+# -- annulation (DELETE /api/observe/{id}) ---------------------------------------
+
+
+def test_delete_observation_removes_a_recorded_report(service: PassageService):
+    service.refresh(now=MORNING)
+    result = service.observe(
+        {"seen": True, "observed_at": MORNING.isoformat(), "precision_s": 3, "source": "app"}
+    )
+    assert service.delete_observation(result["id"]) is True
+
+
+def test_delete_observation_a_second_time_has_no_effect(service: PassageService):
+    # Un « Annuler » relancé deux fois — double appui, latence réseau — ne
+    # doit jamais échouer : rien à annuler la seconde fois n'est pas une erreur.
+    service.refresh(now=MORNING)
+    result = service.observe({"seen": False, "anchor": MORNING.isoformat()})
+    assert service.delete_observation(result["id"]) is True
+    assert service.delete_observation(result["id"]) is False
+
+
+def test_delete_observation_rejects_an_unknown_id(service: PassageService):
+    assert service.delete_observation(999_999) is False
 
 
 def test_observe_rejects_a_non_object_body(service: PassageService):

@@ -78,7 +78,10 @@
 </main>
 
 <!-- Confirmation visuelle d'une observation (appui sur « Il passe ! ») -->
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" hidden>
+  <span id="toast-text" class="toast-text"></span>
+  <button id="toast-action" class="toast-action" type="button" hidden></button>
+</div>
 
 <!-- Carte différée : « le train de HH:MM est-il passé ? » -->
 <div id="confirm-card" class="confirm-card" hidden>

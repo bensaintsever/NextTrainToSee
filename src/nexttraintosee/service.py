@@ -345,7 +345,7 @@ class PassageService:
                 ),
                 precision_s=precision_s,
             )
-            store.record_observation(self.config.site.name, observation)
+            observation_id = store.record_observation(self.config.site.name, observation)
 
         bound_to = None
         gap_s = None
@@ -358,10 +358,20 @@ class PassageService:
             }
         return {
             "recorded": True,
+            "id": observation_id,
             "bound_to": bound_to,
             "ambiguous": binding.ambiguous,
             "gap_s": gap_s,
         }
+
+    def delete_observation(self, observation_id: int) -> bool:
+        """Annule une observation rapportée par erreur (§ 6 : le geste doit être réversible).
+
+        Returns:
+            Vrai si l'observation existait et a été supprimée.
+        """
+        with Store(self.config.data.database) as store:
+            return store.delete_observation(self.config.site.name, observation_id)
 
     # -- histogramme moyenné semaine / week-end -------------------------------
 

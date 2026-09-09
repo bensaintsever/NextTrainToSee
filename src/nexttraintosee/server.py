@@ -85,6 +85,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "route inconnue"}, 404)
             self._log_api(404)
 
+    def do_DELETE(self) -> None:  # noqa: N802 - nom imposé par la stdlib
+        parsed = urlsplit(self.path)
+        path = unquote(parsed.path)
+
+        prefix = "/api/observe/"
+        if path.startswith(prefix):
+            self._handle_delete_observation(path[len(prefix):])
+        else:
+            self._send_json({"error": "route inconnue"}, 404)
+            self._log_api(404)
+
     # -- API -----------------------------------------------------------------
 
     @property
@@ -109,6 +120,24 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_health(self) -> None:
         payload = self._service.health_response()
         self._send_json(payload, 200)
+        self._log_api(200)
+
+    def _handle_delete_observation(self, raw_id: str) -> None:
+        """`DELETE /api/observe/{id}` : annule une observation envoyée par erreur.
+
+        Le geste « Annuler » qui suit un appui accidentel sur « Il passe ! »
+        (§ 6) en dépend. Un identifiant déjà supprimé ou inconnu n'est pas une
+        erreur : un double clic sur « Annuler » doit rester sans effet.
+        """
+        try:
+            observation_id = int(raw_id)
+        except ValueError:
+            self._send_json({"error": "identifiant d'observation invalide"}, 400)
+            self._log_api(400)
+            return
+
+        deleted = self._service.delete_observation(observation_id)
+        self._send_json({"deleted": deleted}, 200)
         self._log_api(200)
 
     def _handle_observe(self) -> None:
