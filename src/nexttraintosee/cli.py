@@ -70,6 +70,22 @@ def _open_feed(config: AppConfig) -> GtfsFeed:
     return GtfsFeed.load(config.data.gtfs_path, anchor_name=config.site.anchor_station)
 
 
+def _warn_if_outside_coverage(feed: GtfsFeed, day) -> None:
+    """Signale une date hors du flux, que l'on confondrait avec une absence de trains."""
+    if feed.calendar.covers(day):
+        return
+    window = feed.calendar.coverage()
+    if window is None:
+        print("Le flux GTFS ne décrit aucune journée de service.", file=sys.stderr)
+        return
+    print(
+        f"⚠ {day.strftime('%d/%m/%Y')} est hors du flux, qui couvre du "
+        f"{window[0].strftime('%d/%m/%Y')} au {window[1].strftime('%d/%m/%Y')}.\n"
+        "  Aucun passage ne sera trouvé — ce n'est pas une absence de circulation.",
+        file=sys.stderr,
+    )
+
+
 def _collect_passages(
     config: AppConfig, feed: GtfsFeed, now: datetime, use_realtime: bool
 ) -> list[Passage]:
@@ -480,6 +496,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         ways, config.site.position, max_distance_m=config.search_radius_m
     )
     day = args.day or datetime.now().date()
+    _warn_if_outside_coverage(feed, day)
     checks = check_segments(feed, corridors, config.site, day, min_trips=args.min_trips)
     if not checks:
         print("Aucun segment exploitable : trop peu de circulations, ou géométrie absente.")
@@ -602,6 +619,7 @@ def cmd_histogram(args: argparse.Namespace) -> int:
         return 2
 
     day = args.day or datetime.now().date()
+    _warn_if_outside_coverage(feed, day)
     passages = predict_passages(feed, config.site, day)
     try:
         buckets = hourly_histogram(passages, args.first_hour, args.last_hour)
@@ -625,6 +643,26 @@ def cmd_histogram(args: argparse.Namespace) -> int:
         categories.update(bucket.by_category)
     print(f"  par branche   : {dict(branches)}")
     print(f"  par catégorie : {dict(categories)}")
+
+    if args.week:
+        print("\nSur la semaine :\n")
+        totals = []
+        for offset in range(7):
+            other = day + timedelta(days=offset)
+            if not feed.calendar.covers(other):
+                totals.append((other, None))
+                continue
+            totals.append((other, predict_passages(feed, config.site, other)))
+        peak = max((len(p) for _, p in totals if p is not None), default=1) or 1
+        for other, found in totals:
+            if found is None:
+                print(f"  {french_date(other):22s}   —  hors du flux")
+                continue
+            ter = sum(1 for x in found if x.category_id == "ter")
+            print(
+                f"  {french_date(other):22s} {len(found):3d}  "
+                f"dont {ter:3d} TER  {'█' * round(32 * len(found) / peak)}"
+            )
 
     if args.csv:
         args.csv.parent.mkdir(parents=True, exist_ok=True)
@@ -707,6 +745,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"\n  GTFS statique        {gtfs} ({size})")
     if not gtfs.exists():
         print(f"      → curl -L -o {gtfs} {GTFS_DOWNLOAD_URL}")
+    else:
+        try:
+            window = _open_feed(config).calendar.coverage()
+        except GtfsError:
+            window = None
+        if window is not None:
+            remaining = (window[1] - datetime.now().date()).days
+            print(
+                f"      couvre du {window[0].strftime('%d/%m/%Y')} au "
+                f"{window[1].strftime('%d/%m/%Y')} — {remaining} jours restants"
+            )
+            if remaining < 30:
+                print("      → pensez à retélécharger le flux")
 
     for module, extra, purpose in (
         ("google.transit.gtfs_realtime_pb2", "realtime", "temps réel GTFS-RT"),
@@ -824,6 +875,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     histogram.add_argument("--first-hour", type=int, default=5, help="première heure incluse")
     histogram.add_argument("--last-hour", type=int, default=23, help="première heure exclue")
+    histogram.add_argument(
+        "--week", action="store_true", help="comparer les sept jours à partir de --day"
+    )
     histogram.add_argument("--csv", type=Path, default=None, help="écrire aussi un tableau CSV")
     histogram.set_defaults(func=cmd_histogram)
 

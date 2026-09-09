@@ -583,3 +583,25 @@ def test_next_can_announce_when_to_be_ready(config_path, capsys):
     out = capsys.readouterr().out
     assert "guetter dès" in out
     assert "passage vers" in out
+
+
+def test_a_day_outside_the_feed_is_flagged(config_path, capsys):
+    assert run(config_path, "histogram", "--day", "2027-06-01") == 0
+    captured = capsys.readouterr()
+    assert "hors du flux" in captured.err
+    assert "pas une absence de circulation" in captured.err
+
+
+def test_histogram_can_compare_a_whole_week(config_path, capsys):
+    assert run(config_path, "histogram", "--day", "2026-09-09", "--week") == 0
+    out = capsys.readouterr().out
+
+    assert "Sur la semaine" in out
+    for day in ("mercredi 09/09/2026", "samedi 12/09/2026", "dimanche 13/09/2026"):
+        assert day in out
+
+
+def test_days_outside_the_feed_are_marked_in_the_weekly_view(config_path, capsys):
+    # Le mini-GTFS s'arrête au 31/12/2026 : la semaine à cheval le montre.
+    assert run(config_path, "histogram", "--day", "2026-12-29", "--week") == 0
+    assert "hors du flux" in capsys.readouterr().out

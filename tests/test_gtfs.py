@@ -166,3 +166,35 @@ def test_index_of_stop_finds_the_anchor_position(gtfs_zip):
     assert feed.trips["T:SE:1"].index_of_stop(sorted(anchor)) == 0
     assert feed.trips["T:N:1"].index_of_stop(sorted(anchor)) == 1
     assert feed.trips["T:N:1"].index_of_stop(["SP:NOWHERE"]) is None
+
+
+def test_the_calendar_reports_its_validity_window(gtfs_zip):
+    feed = load(gtfs_zip)
+    window = feed.calendar.coverage()
+
+    assert window is not None
+    start, end = window
+    assert start <= date(2026, 1, 1)
+    assert end >= date(2026, 12, 31)
+
+
+def test_a_day_outside_the_window_is_distinguished_from_an_empty_day(gtfs_zip):
+    # Sans cette distinction, une date hors flux se lirait « aucun train ».
+    feed = load(gtfs_zip)
+    assert feed.calendar.covers(WEEKDAY)
+    assert not feed.calendar.covers(date(2025, 6, 1))
+    assert not feed.calendar.covers(date(2027, 6, 1))
+
+
+def test_the_window_spans_the_exception_dates_too():
+    from nexttraintosee.gtfs import Calendar
+
+    calendar = Calendar(exceptions={("S", date(2026, 3, 1)): "1", ("S", date(2026, 5, 1)): "1"})
+    assert calendar.coverage() == (date(2026, 3, 1), date(2026, 5, 1))
+
+
+def test_an_empty_calendar_has_no_window():
+    from nexttraintosee.gtfs import Calendar
+
+    assert Calendar().coverage() is None
+    assert not Calendar().covers(WEEKDAY)

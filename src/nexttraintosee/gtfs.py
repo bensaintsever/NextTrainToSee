@@ -158,6 +158,24 @@ class Calendar:
     weekly: dict[str, tuple[frozenset[int], date, date]] = field(default_factory=dict)
     exceptions: dict[tuple[str, date], str] = field(default_factory=dict)
 
+    def coverage(self) -> tuple[date, date] | None:
+        """Première et dernière journée décrites par le calendrier.
+
+        Un flux n'est valable que sur une fenêtre glissante — quelques mois. En
+        dehors, aucun service n'est actif, ce qui se confondrait avec « aucun
+        train ne circule » si on ne distinguait pas les deux cas.
+        """
+        days: list[date] = []
+        for _, (_, start, end) in self.weekly.items():
+            days += [start, end]
+        days += [day for _, day in self.exceptions]
+        return (min(days), max(days)) if days else None
+
+    def covers(self, day: date) -> bool:
+        """Vrai si la journée tombe dans la fenêtre de validité du flux."""
+        window = self.coverage()
+        return window is not None and window[0] <= day <= window[1]
+
     def active_services(self, day: date) -> set[str]:
         """`service_id` circulant à la date donnée."""
         active: set[str] = set()
