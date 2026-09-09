@@ -318,3 +318,39 @@ def test_the_category_shows_in_the_description(feed, site):
     configured = replace(site, categories=(_category(pattern=r"Narbonne"),))
     passage = by_trip(predict_passages(feed, configured, WEEKDAY))["T:SE:1"][0]
     assert "[ter]" in passage.describe()
+
+
+# -- annonce anticipée ---------------------------------------------------------
+
+
+def test_the_announced_time_precedes_the_estimated_passage(feed, site):
+    passage = by_trip(predict_passages(feed, site, WEEKDAY))["T:SE:1"][0]
+    assert passage.announce_at < passage.when
+    assert (passage.when - passage.announce_at).total_seconds() == pytest.approx(
+        passage.uncertainty_s
+    )
+
+
+def test_the_lead_margin_pushes_the_announcement_earlier(feed, site):
+    from dataclasses import replace
+
+    baseline = by_trip(predict_passages(feed, site, WEEKDAY))["T:SE:1"][0]
+    with_margin = by_trip(
+        predict_passages(feed, replace(site, lead_margin_s=30.0), WEEKDAY)
+    )["T:SE:1"][0]
+
+    assert with_margin.when == baseline.when
+    assert (baseline.announce_at - with_margin.announce_at).total_seconds() == pytest.approx(30.0)
+
+
+def test_the_announcement_never_falls_after_the_low_end_of_the_window(feed, site):
+    for passage in predict_passages(feed, site, WEEKDAY):
+        assert passage.announce_at <= passage.window[0]
+
+
+def test_the_watch_description_leads_with_the_time_to_be_ready(feed, site):
+    passage = by_trip(predict_passages(feed, site, WEEKDAY))["T:SE:1"][0]
+    text = passage.describe_watch()
+    assert text.startswith("guetter dès")
+    assert passage.announce_at.strftime("%H:%M:%S") in text
+    assert passage.when.strftime("%H:%M:%S") in text

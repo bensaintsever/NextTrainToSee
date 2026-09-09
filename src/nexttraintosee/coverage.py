@@ -71,16 +71,31 @@ class BucketStats:
 
     @property
     def drift_median_s(self) -> float | None:
-        """Écart médian à l'estimation finale."""
-        return statistics.median(self.drifts_s) if self.drifts_s else None
+        """Écart absolu médian à l'estimation finale."""
+        return statistics.median(abs(d) for d in self.drifts_s) if self.drifts_s else None
 
     @property
     def drift_worst_s(self) -> float | None:
-        """Écart au-delà duquel se trouve un dixième des estimations."""
+        """Écart absolu au-delà duquel se trouve un dixième des estimations."""
         if not self.drifts_s:
             return None
-        ordered = sorted(self.drifts_s)
+        ordered = sorted(abs(d) for d in self.drifts_s)
         return ordered[min(len(ordered) - 1, int(0.9 * len(ordered)))]
+
+    def too_late_share(self, tolerance_s: float = 30.0) -> float:
+        """Part des estimations qui annonçaient le passage trop tard.
+
+        C'est la seule erreur vraiment coûteuse pour qui veut voir passer le
+        train : une annonce en avance se solde par quelques secondes d'attente,
+        une annonce en retard par un passage manqué.
+        """
+        if not self.drifts_s:
+            return 0.0
+        return sum(1 for d in self.drifts_s if d > tolerance_s) / len(self.drifts_s)
+
+    def too_late_worst_s(self) -> float:
+        """Pire retard d'annonce constaté, en secondes."""
+        return max((d for d in self.drifts_s), default=0.0)
 
 
 def analyse(history: History, buckets: tuple[LeadBucket, ...] = DEFAULT_BUCKETS) -> list[BucketStats]:
@@ -112,9 +127,10 @@ def analyse(history: History, buckets: tuple[LeadBucket, ...] = DEFAULT_BUCKETS)
                     entry.sample_count += 1
                     if delay_s is not None:
                         entry.realtime_count += 1
-                    entry.drifts_s.append(
-                        abs((passes_at - final_passage).total_seconds())
-                    )
+                    # Écart signé : positif quand l'estimation annonçait le
+                    # passage *plus tard* qu'il n'a finalement lieu — le cas
+                    # dangereux, celui qui fait arriver après le train.
+                    entry.drifts_s.append((passes_at - final_passage).total_seconds())
                     break
     return stats
 

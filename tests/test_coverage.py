@@ -180,3 +180,41 @@ def test_an_empty_history_is_harmless():
     assert summary.realtime_share == 0.0
     assert summary.on_time_share == 0.0
     assert summary.median_delay_s is None
+
+
+# -- l'erreur qui coûte : annoncer trop tard ----------------------------------
+
+
+def test_an_estimate_announcing_too_late_is_counted():
+    # L'estimation plaçait le passage 120 s après son heure finale : quelqu'un
+    # se serait posté après le passage du train.
+    stats = {s.bucket.label: s for s in analyse(history(
+        a=estimates((20, 120, None), (1, 0, 0)),
+    ))}
+    entry = stats["10 à 30 min"]
+    assert entry.too_late_share() == pytest.approx(1.0)
+    assert entry.too_late_worst_s() == pytest.approx(120.0)
+
+
+def test_an_estimate_announcing_too_early_costs_nothing():
+    stats = {s.bucket.label: s for s in analyse(history(
+        a=estimates((20, -120, None), (1, 0, 0)),
+    ))}
+    entry = stats["10 à 30 min"]
+    assert entry.too_late_share() == 0.0
+    assert entry.too_late_worst_s() <= 0.0
+
+
+def test_small_lateness_is_tolerated():
+    stats = {s.bucket.label: s for s in analyse(history(
+        a=estimates((20, 10, None), (1, 0, 0)),
+    ))}
+    entry = stats["10 à 30 min"]
+    assert entry.too_late_share(tolerance_s=30.0) == 0.0
+    assert entry.too_late_share(tolerance_s=5.0) == pytest.approx(1.0)
+
+
+def test_a_bucket_without_samples_reports_no_risk():
+    empty = analyse(history(a=estimates((5, 0, 0))))[-1]
+    assert empty.too_late_share() == 0.0
+    assert empty.too_late_worst_s() == 0.0

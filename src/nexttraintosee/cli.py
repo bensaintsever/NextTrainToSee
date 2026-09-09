@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib
 import logging
 import sys
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from .gtfs import GtfsError, GtfsFeed
 from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_detections, runs_from_matches
 from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops
 from .predict import Passage, next_passages, predict_passages, service_days_around
+from .report import csv_rows, french_date, hourly_histogram, render_histogram
 from .realtime import RealtimeError, empty_snapshot, load_snapshot
 from .sensor.base import PassageDetector
 from .sensor.replay import read_levels
@@ -293,8 +296,12 @@ def cmd_next(args: argparse.Namespace) -> int:
         return 0
 
     for passage in upcoming:
-        countdown = (passage.when - now).total_seconds() / 60
-        print(f"  dans {countdown:5.1f} min  {passage.describe()}")
+        if args.watch:
+            countdown = (passage.announce_at - now).total_seconds() / 60
+            print(f"  dans {countdown:5.1f} min  {passage.describe_watch()}")
+        else:
+            countdown = (passage.when - now).total_seconds() / 60
+            print(f"  dans {countdown:5.1f} min  {passage.describe()}")
 
     if args.record:
         with Store(config.data.database) as store:
@@ -585,6 +592,48 @@ def _print_speed_fit(config: AppConfig, feed, checks) -> None:
         print()
 
 
+def cmd_histogram(args: argparse.Namespace) -> int:
+    """Répartition horaire des passages devant le point."""
+    config = _load(args)
+    try:
+        feed = _open_feed(config)
+    except GtfsError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    day = args.day or datetime.now().date()
+    passages = predict_passages(feed, config.site, day)
+    try:
+        buckets = hourly_histogram(passages, args.first_hour, args.last_hour)
+    except ValueError as exc:
+        print(f"Plage horaire : {exc}", file=sys.stderr)
+        return 2
+
+    total = sum(b.total for b in buckets)
+    print(f"{config.site.name}")
+    print(f"Passages prédits le {french_date(day)}, "
+          f"de {args.first_hour:02d} h à {args.last_hour:02d} h\n")
+    print("  heure  nb   intervalle")
+    print(render_histogram(buckets))
+    print(f"\n  total {total:3d} passages sur la plage "
+          f"({len(passages)} sur les 24 heures)")
+
+    branches = Counter()
+    categories = Counter()
+    for bucket in buckets:
+        branches.update(bucket.by_branch)
+        categories.update(bucket.by_category)
+    print(f"  par branche   : {dict(branches)}")
+    print(f"  par catégorie : {dict(categories)}")
+
+    if args.csv:
+        args.csv.parent.mkdir(parents=True, exist_ok=True)
+        with args.csv.open("w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle, lineterminator="\n").writerows(csv_rows(buckets))
+        print(f"\nTableau écrit dans {args.csv}")
+    return 0
+
+
 def cmd_coverage(args: argparse.Namespace) -> int:
     """Mesure ce que valent les prédictions à l'avance, d'après l'historique."""
     config = _load(args)
@@ -604,19 +653,19 @@ def cmd_coverage(args: argparse.Namespace) -> int:
     repeated = sum(1 for estimates in history.values() if len(estimates) > 1)
     print(f"{len(history)} passages suivis, dont {repeated} estimés plusieurs fois\n")
 
-    print(f"{'échéance':<20s} {'estimations':>11s} {'temps réel':>11s} "
-          f"{'dérive méd.':>12s} {'dérive p90':>11s}")
+    print(f"{'échéance':<20s} {'estim.':>7s} {'temps réel':>11s} "
+          f"{'dérive méd.':>12s} {'annoncé trop tard':>19s} {'pire':>8s}")
     for entry in analyse(history):
         if not entry.sample_count:
-            print(f"{entry.bucket.label:<20s} {'—':>11s}")
+            print(f"{entry.bucket.label:<20s} {'—':>7s}")
             continue
         median = entry.drift_median_s
-        worst = entry.drift_worst_s
         print(
-            f"{entry.bucket.label:<20s} {entry.sample_count:>11d} "
+            f"{entry.bucket.label:<20s} {entry.sample_count:>7d} "
             f"{entry.realtime_share:>10.0%} "
             f"{(f'{median:.0f} s' if median is not None else '—'):>12s} "
-            f"{(f'{worst:.0f} s' if worst is not None else '—'):>11s}"
+            f"{entry.too_late_share():>18.0%} "
+            f"{entry.too_late_worst_s():>7.0f} s"
         )
 
     summary = summarise_delays(history)
@@ -632,10 +681,12 @@ def cmd_coverage(args: argparse.Namespace) -> int:
         )
 
     print(
-        "\nLecture : la dérive mesure de combien l'heure annoncée bouge encore avant\n"
-        "le passage — c'est l'erreur que verrait quelqu'un consultant l'application à\n"
-        "cette échéance. Elle mesure la stabilité, pas la justesse : une prédiction\n"
-        "stable et fausse passerait inaperçue ici, seul un capteur la démasquerait."
+        "\nLecture : « annoncé trop tard » est la seule erreur qui coûte vraiment —\n"
+        "l'estimation précoce plaçait le passage après son heure finale, donc\n"
+        "quelqu'un se serait posté après le passage du train. Une annonce en avance\n"
+        "ne coûte que de l'attente. Tout ceci mesure la stabilité, pas la justesse :\n"
+        "une prédiction stable et fausse passerait inaperçue, seul un capteur la\n"
+        "démasquerait."
     )
     return 0
 
@@ -707,6 +758,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upcoming.add_argument("--record", action="store_true", help="journaliser les prédictions")
     upcoming.add_argument(
+        "--watch",
+        action="store_true",
+        help="annoncer le plus tôt où le train peut passer, plutôt que l'heure centrale",
+    )
+    upcoming.add_argument(
         "--at",
         type=_moment,
         default=None,
@@ -758,6 +814,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--fit", action="store_true", help="proposer une vitesse de ligne par branche"
     )
     validating.set_defaults(func=cmd_validate)
+
+    histogram = subparsers.add_parser(
+        "histogram", help="répartition horaire des passages"
+    )
+    histogram.add_argument(
+        "--day", type=lambda v: datetime.strptime(v, "%Y-%m-%d").date(), default=None,
+        help="journée de service (AAAA-MM-JJ)",
+    )
+    histogram.add_argument("--first-hour", type=int, default=5, help="première heure incluse")
+    histogram.add_argument("--last-hour", type=int, default=23, help="première heure exclue")
+    histogram.add_argument("--csv", type=Path, default=None, help="écrire aussi un tableau CSV")
+    histogram.set_defaults(func=cmd_histogram)
 
     covering = subparsers.add_parser(
         "coverage", help="mesurer couverture temps réel et stabilité des prédictions"

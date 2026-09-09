@@ -530,3 +530,56 @@ def test_validate_says_which_categories_it_cannot_calibrate(tracks_config, tmp_p
 def test_validate_reports_the_spread_of_each_segment(tracks_config, capsys):
     assert run(tracks_config, "validate", "--min-trips", "1", "--day", "2026-09-09") == 0
     assert "étendue" in capsys.readouterr().out
+
+
+# -- répartition horaire -------------------------------------------------------
+
+
+def test_histogram_shows_one_line_per_hour(config_path, capsys):
+    assert run(config_path, "histogram", "--day", "2026-09-09") == 0
+    out = capsys.readouterr().out
+
+    assert "mercredi 09/09/2026" in out
+    for hour in ("05 h", "12 h", "22 h"):
+        assert hour in out
+    # La nuit ferroviaire est exclue par défaut.
+    assert "02 h" not in out
+
+
+def _histogram_hours(output: str) -> list[str]:
+    """Heures effectivement tracées, en ignorant l'en-tête qui cite la plage."""
+    return [
+        line.split()[0]
+        for line in output.splitlines()
+        if line.startswith("  ") and line.strip()[:2].isdigit() and " h " in line
+    ]
+
+
+def test_histogram_range_is_adjustable(config_path, capsys):
+    assert run(config_path, "histogram", "--day", "2026-09-09", "--first-hour", "8",
+               "--last-hour", "10") == 0
+    assert _histogram_hours(capsys.readouterr().out) == ["08", "09"]
+
+
+def test_histogram_rejects_an_impossible_range(config_path, capsys):
+    assert run(config_path, "histogram", "--first-hour", "12", "--last-hour", "12") == 2
+    assert "Plage horaire" in capsys.readouterr().err
+
+
+def test_histogram_can_write_a_table(config_path, tmp_path, capsys):
+    import csv as csv_module
+
+    target = tmp_path / "sortie" / "histogramme.csv"
+    assert run(config_path, "histogram", "--day", "2026-09-09", "--csv", str(target)) == 0
+
+    assert target.exists()
+    rows = list(csv_module.reader(target.open(encoding="utf-8")))
+    assert rows[0][0] == "heure"
+    assert len(rows) == 19  # en-tête plus dix-huit heures
+
+
+def test_next_can_announce_when_to_be_ready(config_path, capsys):
+    assert run(config_path, "next", "--no-realtime", "--at", MORNING.isoformat(), "--watch") == 0
+    out = capsys.readouterr().out
+    assert "guetter dès" in out
+    assert "passage vers" in out

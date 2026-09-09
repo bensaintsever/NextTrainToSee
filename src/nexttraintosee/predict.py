@@ -128,6 +128,13 @@ class Site:
     anchor_position: LatLon | None = None
     """Position de la gare d'appui ; déduite du GTFS si absente."""
     profile: TractionProfile = field(default_factory=TractionProfile)
+    lead_margin_s: float = 0.0
+    """Marge d'anticipation ajoutée à l'incertitude pour l'heure annoncée.
+
+    Le temps qu'il faut pour se poster à la fenêtre. Manquer un train parce que
+    l'annonce arrive trop tard est un échec ; attendre quelques secondes de trop
+    ne l'est pas.
+    """
     categories: tuple[TrainCategory, ...] = ()
     """Profils par type de matériel, essayés dans l'ordre déclaré."""
 
@@ -185,6 +192,19 @@ class Passage:
     """Retard temps réel appliqué, en secondes. None si aucune donnée."""
     category_id: str | None = None
     """Catégorie de matériel retenue, si elle a pu être reconnue."""
+    lead_margin_s: float = 0.0
+    """Marge d'anticipation appliquée à l'heure annoncée."""
+
+    @property
+    def announce_at(self) -> datetime:
+        """Heure à annoncer : le plus tôt où le train peut se présenter.
+
+        L'erreur d'annonce n'est pas symétrique. Annoncer trop tôt coûte
+        quelques secondes d'attente ; annoncer trop tard fait manquer le
+        passage, et c'est irrattrapable. On annonce donc la borne basse de la
+        fenêtre, diminuée de la marge d'anticipation.
+        """
+        return self.when - timedelta(seconds=self.uncertainty_s + self.lead_margin_s)
 
     @property
     def is_realtime(self) -> bool:
@@ -207,6 +227,16 @@ class Passage:
         return (
             f"{stamp} ±{self.uncertainty_s:.0f}s [{flag}] {arrow} {self.branch.label} "
             f"· {self.route_label} {self.headsign}{category}{delay} · {self.speed_kmh:.0f} km/h"
+        )
+
+    def describe_watch(self) -> str:
+        """Formulation orientée guet : à partir de quand se tenir prêt."""
+        arrow = "→" if self.direction is Direction.OUTBOUND else "←"
+        category = f" [{self.category_id}]" if self.category_id else ""
+        return (
+            f"guetter dès {self.announce_at.strftime('%H:%M:%S')} · "
+            f"passage vers {self.when.strftime('%H:%M:%S')} (±{self.uncertainty_s:.0f} s) "
+            f"{arrow} {self.branch.label} · {self.route_label} {self.headsign}{category}"
         )
 
 
@@ -357,6 +387,7 @@ def predict_passages(
                     headsign=trip.headsign,
                     delay_s=delay,
                     category_id=category.category_id if category else None,
+                    lead_margin_s=site.lead_margin_s,
                 )
             )
 

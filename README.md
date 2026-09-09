@@ -115,22 +115,48 @@ nexttraintosee tracks
 # 2. Les prochains passages, temps réel compris
 nexttraintosee next
 nexttraintosee next --horizon 30 --no-realtime
+nexttraintosee next --watch             # « guetter dès HH:MM:SS »
 nexttraintosee next --at 2026-09-09T18:00 --record
 
-# 3. Vérifier le modèle de marche — sans capteur ni présence sur place
+# 3. Répartition horaire des passages
+nexttraintosee histogram
+nexttraintosee histogram --csv data/histogramme.csv
+
+# 4. Vérifier le modèle de marche — sans capteur ni présence sur place
 nexttraintosee validate
 nexttraintosee validate --fit          # propose une vitesse de ligne par branche
 
-# 4. Écouter le capteur et journaliser les passages réellement observés
+# 5. Collecter à intervalle régulier, pour mesurer ce que valent les annonces
+./scripts/collect.sh 180        # puis, plus tard :
+nexttraintosee coverage --days 7
+
+# 6. Écouter le capteur et journaliser les passages réellement observés
 nexttraintosee listen --duration 60
 
-# 5. Recaler le modèle et lister ce qui n'est dans aucun horaire
+# 7. Recaler le modèle et lister ce qui n'est dans aucun horaire
 nexttraintosee calibrate --days 7
 ```
 
 La configuration du site vit dans
 [`config/toulouse-guilhemery.toml`](config/toulouse-guilhemery.toml) : point,
 gare d'appui, branches, profil de marche, réglages du capteur.
+
+## Annoncer tôt plutôt que juste
+
+L'erreur d'annonce n'est pas symétrique. Pour qui veut voir passer le train,
+annoncer trop tôt coûte quelques secondes d'attente ; annoncer trop tard fait
+manquer le passage, et rien ne le rattrape.
+
+`next --watch` annonce donc la **borne basse** de la fenêtre, diminuée de
+`lead_margin_s` — le temps de se poster :
+
+```
+  dans 5.1 min  guetter dès 11:26:30 · passage vers 11:26:44 (±13 s) ← Axe Saint-Agne …
+```
+
+`coverage` mesure la même asymétrie : sa colonne « annoncé trop tard » compte
+les estimations qui plaçaient le passage après son heure finale — les seules qui
+coûtent vraiment.
 
 ## Vérifier le modèle sans se déplacer
 
@@ -197,7 +223,7 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 268 tests, sans réseau), et la
+Le noyau est écrit et testé (`python -m pytest`, 310 tests, sans réseau), et la
 chaîne complète a tourné sur les données réelles : géométrie OpenStreetMap
 résolue, horaires SNCF chargés, retards temps réel appliqués, modèle de marche
 confronté aux horaires.

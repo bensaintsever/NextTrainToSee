@@ -18,6 +18,9 @@ anchor_station = "Toulouse Matabiau"
 anchor_lat = 43.6112
 anchor_lon = 1.4535
 search_radius_m = 500
+# Temps de se poster à la fenêtre. S'ajoute à l'incertitude pour former l'heure
+# annoncée : rater un passage coûte bien plus que d'attendre vingt secondes.
+lead_margin_s = 20.0
 
 [profile]
 # Automoteur régional en sortie de gare urbaine. À recaler avec `calibrate`.

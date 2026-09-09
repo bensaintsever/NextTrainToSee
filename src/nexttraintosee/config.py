@@ -145,6 +145,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path | None = None) -> AppConfig
         branches=branches,
         profile=profile,
         categories=categories,
+        lead_margin_s=float(site_table.get("lead_margin_s", 0.0)),
     )
 
     data_table = raw.get("data", {})
