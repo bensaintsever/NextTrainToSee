@@ -1,9 +1,14 @@
 # Point d'observation : 43°35'52.2"N 1°27'29.5"E
 #
-# ATTENTION — les valeurs marquées « À MESURER » sont des estimations calculées
-# à la table, faute d'accès réseau au moment de la rédaction. Lancez
-# `nexttraintosee tracks -c config/toulouse-guilhemery.toml` pour les remplacer
-# par les valeurs réellement mesurées sur la géométrie OpenStreetMap.
+# `nexttraintosee tracks -c config/toulouse-guilhemery.toml` mesure la géométrie
+# réelle sur OpenStreetMap et imprime le bloc [[branches]] à recopier ici.
+# Les valeurs ci-dessous marquées « À MESURER » sont des estimations en attendant.
+#
+# Géographie du secteur : au sud de Matabiau, toutes les lignes descendent
+# ensemble sur environ deux kilomètres avant de se séparer aux bifurcations du
+# Grand-Rond et d'Empalot. Le point d'observation est à 1,5 km de la gare, donc
+# *dans* ce tronc commun : tout ce qui quitte Matabiau vers le sud passe devant,
+# quelle que soit sa destination finale.
 
 [site]
 name = "Toulouse — sud de Matabiau (Guilheméry / Port Saint-Sauveur)"
@@ -18,7 +23,10 @@ search_radius_m = 500
 # Automoteur régional en sortie de gare urbaine. À recaler avec `calibrate`.
 accel_ms2 = 0.5
 decel_ms2 = 0.6
-line_speed_kmh = 90.0
+# 120 km/h est la vitesse limite relevée sur OpenStreetMap pour les trois
+# corridors du secteur ; c'est un plafond d'infrastructure, pas la marche réelle
+# d'un TER en sortie de gare — `calibrate` ajustera.
+line_speed_kmh = 120.0
 sinuosity = 1.05
 
 # --- Branches au départ de Toulouse-Matabiau --------------------------------
@@ -34,9 +42,9 @@ track_distance_m = 1650.0   # À MESURER (estimation : 1534 m à vol d'oiseau ×
 
 [[branches]]
 id = "sud"
-label = "Axe Latour-de-Carol / Auch (via Saint-Agne)"
+label = "Axe Latour-de-Carol / Bayonne / Auch (via Saint-Agne)"
 bearing_deg = 184.2
-passes_observer = true      # À VÉRIFIER : dépend de l'écartement des faisceaux
+passes_observer = true
 track_distance_m = 1600.0   # À MESURER
 
 [[branches]]
@@ -47,9 +55,15 @@ passes_observer = false
 
 [[branches]]
 id = "ouest"
-label = "Axe Auch / Bayonne (via Colomiers)"
+label = "Axe Auch / Colomiers (desserte directe, sans arrêt à Saint-Agne)"
 bearing_deg = 269.8
-passes_observer = false
+# Contre-intuitif mais exact : Colomiers est plein ouest de Matabiau, alors que
+# les trains qui s'y rendent partent vers le SUD. La ligne de Saint-Agne à Auch
+# descend d'abord avec les autres, bifurque vers l'ouest après Saint-Agne, puis
+# remonte vers Saint-Cyprien-Arènes et Colomiers. Une desserte directe
+# Matabiau -> Colomiers donne donc un cap de 270° tout en passant devant le point.
+passes_observer = true
+track_distance_m = 1600.0   # À MESURER — même tronc commun que la branche « sud »
 
 [data]
 gtfs_path = "../data/sncf-gtfs.zip"

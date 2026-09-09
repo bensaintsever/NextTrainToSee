@@ -148,4 +148,8 @@ def test_the_shipped_toulouse_configuration_loads():
     config = load_config(Path(__file__).resolve().parents[1] / "config" / "toulouse-guilhemery.toml")
     assert config.site.anchor_station == "Toulouse Matabiau"
     visible = [b.branch_id for b in config.site.branches if b.passes_observer]
-    assert visible == ["se", "sud"]
+    # Le point est dans le tronc commun au sud de Matabiau : tout ce qui part
+    # vers le sud passe devant, y compris les dessertes de Colomiers dont le cap
+    # est pourtant plein ouest. Seul l'axe nord est exclu.
+    assert visible == ["se", "sud", "ouest"]
+    assert config.site.profile.line_speed_kmh == 120.0

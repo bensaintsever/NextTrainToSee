@@ -149,7 +149,7 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 177 tests, sans réseau).
+Le noyau est écrit et testé (`python -m pytest`, 191 tests, sans réseau).
 
 ⚠️ **Une étape reste à faire chez vous** : la géométrie exacte des voies au
 droit du point n'a pas pu être vérifiée — l'environnement dans lequel ce code a

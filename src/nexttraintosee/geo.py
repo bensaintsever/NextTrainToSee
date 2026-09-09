@@ -146,6 +146,31 @@ def project_on_polyline(point: LatLon, polyline: Sequence[LatLon]) -> Projection
     return best
 
 
+def interpolate_along(polyline: Sequence[LatLon], along_m: float) -> LatLon:
+    """Point situé à l'abscisse curviligne `along_m` sur la polyligne.
+
+    Borné aux extrémités : une abscisse négative renvoie le premier sommet, une
+    abscisse au-delà de la longueur totale renvoie le dernier.
+    """
+    if len(polyline) < 2:
+        raise ValueError("une polyligne doit avoir au moins deux sommets")
+    cumulative = cumulative_lengths_m(polyline)
+    if along_m <= 0:
+        return polyline[0]
+    if along_m >= cumulative[-1]:
+        return polyline[-1]
+    for i in range(len(polyline) - 1):
+        if cumulative[i] <= along_m <= cumulative[i + 1]:
+            span = cumulative[i + 1] - cumulative[i]
+            fraction = 0.0 if span == 0 else (along_m - cumulative[i]) / span
+            ax, ay = to_local_xy(polyline[i], polyline[i])
+            bx, by = to_local_xy(polyline[i], polyline[i + 1])
+            return from_local_xy(
+                polyline[i], (ax + fraction * (bx - ax), ay + fraction * (by - ay))
+            )
+    return polyline[-1]
+
+
 def densify(polyline: Sequence[LatLon], max_step_m: float) -> list[LatLon]:
     """Insère des sommets pour qu'aucun segment ne dépasse `max_step_m`.
 

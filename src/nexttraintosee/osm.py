@@ -29,7 +29,10 @@ from .geo import (
     LatLon,
     Projection,
     axis_distance_deg,
+    bearing_distance_deg,
     haversine_m,
+    initial_bearing_deg,
+    interpolate_along,
     polyline_length_m,
     project_on_polyline,
 )
@@ -104,6 +107,48 @@ class RailStop:
         return self.tags.get("uic_ref") or self.tags.get("ref:SNCF")
 
 
+#: En deçà de cette distance de visée, la géométrie récupérée est trop courte
+#: pour dire vers où part le corridor.
+MIN_LOOKAHEAD_M = 250.0
+
+
+@dataclass(frozen=True)
+class AnchorLink:
+    """Relation géométrique entre un corridor et la gare d'appui."""
+
+    along_distance_m: float
+    """Distance à parcourir sur la voie entre la gare et le point."""
+    anchor_offset_m: float
+    """Distance de la gare à la polyligne du corridor.
+
+    Si elle est grande, la géométrie récupérée n'atteint pas la gare et
+    `along_distance_m` n'a aucun sens.
+    """
+    outbound_bearing_deg: float | None
+    """Cap, depuis la gare, de la direction que prend le corridor après le point."""
+    straight_distance_m: float
+    """Distance gare -> point à vol d'oiseau, pour contrôle de vraisemblance."""
+
+    @property
+    def is_plausible(self) -> bool:
+        """Une distance sur la voie ne peut pas être plus courte qu'à vol d'oiseau.
+
+        Si elle l'est, c'est que la polyligne s'arrête avant la gare et que la
+        projection a été bornée à son extrémité : le résultat est inexploitable.
+        """
+        # Une gare peut être bâtie à l'écart de la voie : la distance à vol
+        # d'oiseau depuis le bâtiment inclut alors ce décalage, qu'il faut
+        # déduire avant de comparer.
+        reachable = max(0.0, self.straight_distance_m - self.anchor_offset_m)
+        return self.anchor_offset_m <= MAX_ANCHOR_OFFSET_M and self.along_distance_m >= reachable * 0.95
+
+
+#: Au-delà, on considère que le corridor n'atteint pas la gare d'appui. Le seuil
+#: est large : un bâtiment voyageurs est parfois bâti à l'écart des voies, et la
+#: position configurée n'est souvent qu'un centroïde approximatif.
+MAX_ANCHOR_OFFSET_M = 400.0
+
+
 @dataclass(frozen=True)
 class Corridor:
     """Un faisceau de voies parallèles vu depuis le point d'observation.
@@ -126,24 +171,61 @@ class Corridor:
     """Polyligne représentative (la plus longue chaîne du corridor)."""
     projection: Projection
     """Projection du point d'observation sur `centerline`."""
+    observer: LatLon = (0.0, 0.0)
+    """Point d'observation ayant servi à construire le corridor."""
 
     @property
-    def track_count(self) -> int:
+    def segment_count(self) -> int:
+        """Nombre de tronçons OSM regroupés.
+
+        Ce n'est **pas** le nombre de voies physiques : OSM découpe une même
+        voie en plusieurs `way` à chaque changement de pont, de vitesse ou
+        d'électrification. Voir `lateral_spread_m` pour la largeur du faisceau.
+        """
         return len(self.ways)
+
+    @property
+    def lateral_spread_m(self) -> float:
+        """Écart latéral entre le tronçon le plus proche et le plus éloigné.
+
+        Un faisceau à deux voies fait quelques mètres de large ; une valeur de
+        plusieurs dizaines de mètres indique un vrai faisceau de plusieurs voies.
+        """
+        distances = [project_on_polyline(self.observer, w.geometry).distance_m for w in self.ways]
+        return max(distances) - min(distances) if distances else 0.0
 
     @property
     def maxspeed_kmh(self) -> float | None:
         speeds = [w.maxspeed_kmh for w in self.ways if w.maxspeed_kmh]
         return max(speeds) if speeds else None
 
-    def along_distance_to_m(self, position: LatLon) -> float:
-        """Distance curviligne, le long des voies, entre `position` et le point.
+    def link_to(self, anchor: LatLon, lookahead_m: float = 4000.0) -> "AnchorLink":
+        """Relie le corridor à une gare d'appui.
 
-        Beaucoup plus juste que la distance à vol d'oiseau dès que la ligne
-        courbe — ce qui est la règle en sortie de gare.
+        Args:
+            anchor: position de la gare d'appui.
+            lookahead_m: distance de visée au-delà du point, pour déterminer
+                vers où part le corridor.
         """
-        other = project_on_polyline(position, self.centerline)
-        return abs(other.along_m - self.projection.along_m)
+        anchor_projection = project_on_polyline(anchor, self.centerline)
+        along = abs(anchor_projection.along_m - self.projection.along_m)
+
+        # Sens dans lequel on s'éloigne de la gare en passant par le point.
+        forward = 1.0 if self.projection.along_m >= anchor_projection.along_m else -1.0
+        total = polyline_length_m(self.centerline)
+        target = min(max(self.projection.along_m + forward * lookahead_m, 0.0), total)
+        available = abs(target - self.projection.along_m)
+        outbound = (
+            initial_bearing_deg(anchor, interpolate_along(self.centerline, target))
+            if available >= MIN_LOOKAHEAD_M
+            else None
+        )
+        return AnchorLink(
+            along_distance_m=along,
+            anchor_offset_m=anchor_projection.distance_m,
+            outbound_bearing_deg=outbound,
+            straight_distance_m=haversine_m(anchor, self.observer),
+        )
 
 
 # --------------------------------------------------------------------------
@@ -178,13 +260,89 @@ def _endpoint_key(point: LatLon, precision: int = 7) -> tuple[float, float]:
     return (round(point[0], precision), round(point[1], precision))
 
 
-def stitch_ways(ways: Sequence[RailWay]) -> list[list[LatLon]]:
+def _oriented_candidates(chain: list[LatLon], geometry: list[LatLon]):
+    """Façons de raccorder `geometry` à une extrémité de `chain`.
+
+    Produit des triplets (au_bout, géométrie orientée, angle de virage). L'angle
+    mesure combien la voie tourne au raccord : c'est lui qui départage les
+    embranchements.
+    """
+    head, tail = _endpoint_key(chain[0]), _endpoint_key(chain[-1])
+    g_head, g_tail = _endpoint_key(geometry[0]), _endpoint_key(geometry[-1])
+
+    if g_head == tail:
+        oriented = geometry
+    elif g_tail == tail:
+        oriented = list(reversed(geometry))
+    else:
+        oriented = None
+    if oriented is not None:
+        incoming = initial_bearing_deg(chain[-2], chain[-1])
+        outgoing = initial_bearing_deg(oriented[0], oriented[1])
+        yield True, oriented, bearing_distance_deg(incoming, outgoing)
+
+    if g_tail == head:
+        oriented = geometry
+    elif g_head == head:
+        oriented = list(reversed(geometry))
+    else:
+        oriented = None
+    if oriented is not None:
+        # On prolonge par l'amont : on compare le cap d'arrivée du candidat au
+        # cap de départ de la chaîne.
+        arriving = initial_bearing_deg(oriented[-2], oriented[-1])
+        chain_start = initial_bearing_deg(chain[0], chain[1])
+        yield False, oriented, bearing_distance_deg(arriving, chain_start)
+
+
+#: Virage maximal toléré pour considérer que deux tronçons prolongent la même
+#: ligne. Au-delà, on est passé sur une branche voisine.
+MAX_CONTINUATION_TURN_DEG = 55.0
+
+
+def extend_chain(
+    chain: list[LatLon],
+    pool: dict[int, list[LatLon]],
+    max_turn_deg: float = MAX_CONTINUATION_TURN_DEG,
+) -> list[LatLon]:
+    """Prolonge une chaîne par les tronçons du vivier qui la continuent.
+
+    À chaque pas on retient le raccord le plus droit, et on refuse au-delà de
+    `max_turn_deg` : c'est ce qui empêche la chaîne de basculer sur une ligne
+    voisine en traversant une gare, où toutes les lignes partagent des nœuds.
+
+    Le vivier est consommé au passage.
+    """
+    while True:
+        best: tuple[float, int, bool, list[LatLon]] | None = None
+        for other_id, geometry in pool.items():
+            for at_tail, oriented, turn in _oriented_candidates(chain, geometry):
+                if turn <= max_turn_deg and (best is None or turn < best[0]):
+                    best = (turn, other_id, at_tail, oriented)
+        if best is None:
+            return chain
+        _, other_id, at_tail, oriented = best
+        del pool[other_id]
+        if at_tail:
+            chain.extend(oriented[1:])
+        else:
+            chain[:0] = oriented[:-1]
+
+
+def stitch_ways(
+    ways: Sequence[RailWay], max_turn_deg: float = MAX_CONTINUATION_TURN_DEG
+) -> list[list[LatLon]]:
     """Recolle des tronçons OSM en chaînes continues.
 
     OSM découpe une ligne en de nombreux `way` (changement de vitesse, de pont,
     d'électrification...). Pour mesurer une distance curviligne il faut d'abord
     reconstituer des polylignes continues en recollant les tronçons par leurs
     extrémités communes.
+
+    À un embranchement, plusieurs tronçons partagent le même nœud : on retient
+    alors **le plus droit**. C'est l'heuristique usuelle pour suivre une ligne à
+    travers un aiguillage, et elle évite qu'une chaîne ne parte sur la branche
+    voisine au milieu du parcours.
     """
     remaining = {w.osm_id: list(w.geometry) for w in ways}
     chains: list[list[LatLon]] = []
@@ -193,27 +351,7 @@ def stitch_ways(ways: Sequence[RailWay]) -> list[list[LatLon]]:
         # On démarre sur le tronçon le plus long restant : cela donne des chaînes
         # stables et indépendantes de l'ordre de la réponse Overpass.
         seed_id = max(remaining, key=lambda i: polyline_length_m(remaining[i]))
-        chain = remaining.pop(seed_id)
-        extended = True
-        while extended:
-            extended = False
-            head, tail = _endpoint_key(chain[0]), _endpoint_key(chain[-1])
-            for other_id, geom in list(remaining.items()):
-                g_head, g_tail = _endpoint_key(geom[0]), _endpoint_key(geom[-1])
-                if g_head == tail:
-                    chain.extend(geom[1:])
-                elif g_tail == tail:
-                    chain.extend(reversed(geom[:-1]))
-                elif g_tail == head:
-                    chain[:0] = geom[:-1]
-                elif g_head == head:
-                    chain[:0] = list(reversed(geom[1:]))
-                else:
-                    continue
-                del remaining[other_id]
-                extended = True
-                break
-        chains.append(chain)
+        chains.append(extend_chain(remaining.pop(seed_id), remaining, max_turn_deg))
 
     chains.sort(key=polyline_length_m, reverse=True)
     return chains
@@ -240,12 +378,15 @@ def build_corridors(
     Returns:
         Les corridors triés du plus proche au plus éloigné.
     """
+    usable = [
+        way
+        for way in ways
+        if way.tags.get("railway") in MAIN_RAILWAY_VALUES
+        and (include_service or not way.is_service)
+    ]
+
     candidates: list[tuple[RailWay, Projection]] = []
-    for way in ways:
-        if not include_service and way.is_service:
-            continue
-        if way.tags.get("railway") not in MAIN_RAILWAY_VALUES:
-            continue
+    for way in usable:
         projection = project_on_polyline(point, way.geometry)
         if projection.distance_m <= max_distance_m:
             candidates.append((way, projection))
@@ -270,10 +411,19 @@ def build_corridors(
     corridors: list[Corridor] = []
     for index, group in enumerate(groups):
         group_ways = [w for w, _ in group]
-        chains = stitch_ways(group_ways)
-        centerline = max(chains, key=polyline_length_m)
-        projection = project_on_polyline(point, centerline)
         nearest = min(p.distance_m for _, p in group)
+        # La polyligne représentative est amorcée sur les voies du corridor
+        # lui-même, puis prolongée par les tronçons voisins qui la continuent
+        # sans virage brusque. L'amorçage est essentiel : une chaîne construite
+        # globalement traverserait la gare et basculerait sur la ligne voisine,
+        # puisque toutes y partagent des nœuds.
+        group_ids = {w.osm_id for w in group_ways}
+        centerline = max(stitch_ways(group_ways), key=polyline_length_m)
+        centerline = extend_chain(
+            centerline,
+            {w.osm_id: list(w.geometry) for w in usable if w.osm_id not in group_ids},
+        )
+        projection = project_on_polyline(point, centerline)
         label = next(
             (w.name for w in group_ways if w.name),
             next((w.ref for w in group_ways if w.ref), f"corridor {index + 1}"),
@@ -287,6 +437,7 @@ def build_corridors(
                 axis_deg=projection.bearing_deg % 180.0,
                 centerline=tuple(centerline),
                 projection=projection,
+                observer=point,
             )
         )
 
@@ -294,16 +445,45 @@ def build_corridors(
     return corridors
 
 
-def build_query(point: LatLon, radius_m: float, include_service: bool = True) -> str:
-    """Construit la requête Overpass QL pour un point d'observation."""
+def build_query(
+    point: LatLon,
+    radius_m: float,
+    include_service: bool = True,
+    anchor: LatLon | None = None,
+    anchor_corridor_m: float = 400.0,
+) -> str:
+    """Construit la requête Overpass QL pour un point d'observation.
+
+    Args:
+        point: point d'observation.
+        radius_m: rayon de recherche des voies autour du point.
+        include_service: récupérer aussi les voies de service.
+        anchor: gare d'appui. Quand elle est fournie, la requête récupère aussi
+            les voies longeant le segment point <-> gare : sans elles, les
+            polylignes s'arrêtent au bord du rayon de recherche et toute
+            distance mesurée jusqu'à la gare est fausse.
+        anchor_corridor_m: demi-largeur du couloir récupéré le long de ce segment.
+    """
     lat, lon = point
     railway_filter = "|".join(MAIN_RAILWAY_VALUES)
     service_clause = "" if include_service else '["service"!~"."]'
+    rail_clause = f'["railway"~"^({railway_filter})$"]{service_clause}'
+
+    corridor_clause = ""
+    station_radius = radius_m * 4
+    if anchor is not None:
+        # `around` accepte une polyligne : on balaie tout le couloir menant à la gare.
+        corridor_clause = (
+            f"  way(around:{anchor_corridor_m:.0f},"
+            f"{lat:.6f},{lon:.6f},{anchor[0]:.6f},{anchor[1]:.6f}){rail_clause};\n"
+        )
+        station_radius = max(station_radius, haversine_m(point, anchor) + 1000.0)
+
     return f"""
-[out:json][timeout:90];
+[out:json][timeout:120];
 (
-  way(around:{radius_m:.0f},{lat:.6f},{lon:.6f})["railway"~"^({railway_filter})$"]{service_clause};
-  node(around:{radius_m * 4:.0f},{lat:.6f},{lon:.6f})["railway"~"^(station|halt)$"];
+  way(around:{radius_m:.0f},{lat:.6f},{lon:.6f}){rail_clause};
+{corridor_clause}  node(around:{station_radius:.0f},{lat:.6f},{lon:.6f})["railway"~"^(station|halt)$"]["station"!~"^(subway|light_rail|monorail)$"];
 );
 out tags geom;
 """.strip()
@@ -339,13 +519,14 @@ class OverpassClient:
         self.timeout_s = timeout_s
         self.user_agent = user_agent
 
-    def _cache_path(self, query: str) -> Path:
+    def cache_path(self, query: str) -> Path:
+        """Emplacement du cache pour une requête donnée."""
         digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
         return self.cache_dir / f"{digest}.json"
 
     def query(self, query: str, refresh: bool = False) -> dict[str, Any]:
         """Exécute une requête Overpass QL, en passant par le cache disque."""
-        path = self._cache_path(query)
+        path = self.cache_path(query)
         if path.exists() and not refresh:
             log.debug("Overpass : réponse servie depuis le cache %s", path)
             return json.loads(path.read_text(encoding="utf-8"))
@@ -367,10 +548,15 @@ class OverpassClient:
         return payload
 
     def around(
-        self, point: LatLon, radius_m: float = 400.0, refresh: bool = False
+        self,
+        point: LatLon,
+        radius_m: float = 400.0,
+        refresh: bool = False,
+        anchor: LatLon | None = None,
     ) -> tuple[list[RailWay], list[RailStop]]:
-        """Récupère voies et gares autour d'un point."""
-        return parse_overpass(self.query(build_query(point, radius_m), refresh=refresh))
+        """Récupère voies et gares autour d'un point, et jusqu'à la gare d'appui."""
+        query = build_query(point, radius_m, anchor=anchor)
+        return parse_overpass(self.query(query, refresh=refresh))
 
 
 def nearest_stops(stops: Iterable[RailStop], point: LatLon, limit: int = 5) -> list[tuple[RailStop, float]]:

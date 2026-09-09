@@ -248,3 +248,157 @@ def test_doctor_survives_a_broken_optional_dependency(config_path, monkeypatch, 
     monkeypatch.setattr(importlib, "import_module", explode)
     assert run(config_path, "doctor") == 0
     assert "installé mais inutilisable" in capsys.readouterr().out
+
+
+# -- résolution des voies (tracks) -------------------------------------------
+
+
+def _overpass_payload():
+    """Réponse Overpass synthétique : deux lignes divergeant au sud de la gare.
+
+    Reproduit la configuration toulousaine — l'axe de Sète part au sud-est,
+    celui de Bayonne plein sud — pour vérifier que chaque branche est rattachée
+    au bon corridor.
+    """
+    from nexttraintosee.geo import from_local_xy, haversine_m, initial_bearing_deg, to_local_xy
+
+    observer = (43.597833, 1.458194)
+    anchor = (43.6112, 1.4535)
+
+    def far(bearing_deg: float, distance_m: float):
+        import math
+
+        rad = math.radians(bearing_deg)
+        return from_local_xy(anchor, (distance_m * math.sin(rad), distance_m * math.cos(rad)))
+
+    def offset(east_m: float):
+        x, y = to_local_xy(observer, observer)
+        return from_local_xy(observer, (x + east_m, y))
+
+    def way(osm_id, name, points):
+        return {
+            "type": "way",
+            "id": osm_id,
+            "tags": {"railway": "rail", "name": name, "maxspeed": "120", "usage": "main"},
+            "geometry": [{"lat": p[0], "lon": p[1]} for p in points],
+        }
+
+    sete = [anchor, offset(20.0), far(137.5, 8000.0)]
+    bayonne = [anchor, offset(-380.0), far(184.2, 8000.0)]
+
+    assert haversine_m(observer, offset(20.0)) < 40
+    assert 130 < initial_bearing_deg(anchor, sete[-1]) < 145
+
+    return {
+        "elements": [
+            way(1, "Ligne de Bordeaux-Saint-Jean à Sète-Ville", sete),
+            way(2, "Ligne de Toulouse à Bayonne", bayonne),
+            {
+                "type": "node",
+                "id": 10,
+                "lat": anchor[0],
+                "lon": anchor[1],
+                "tags": {"railway": "station", "name": "Toulouse Matabiau"},
+            },
+        ]
+    }
+
+
+@pytest.fixture
+def tracks_config(tmp_path: Path, gtfs_zip: Path) -> Path:
+    """Configuration dont le cache Overpass est pré-rempli, pour tester hors ligne."""
+    import json
+
+    from nexttraintosee.osm import OverpassClient, build_query
+
+    path = tmp_path / "site.toml"
+    path.write_text(
+        CONFIG.format(gtfs=gtfs_zip, database=tmp_path / "journal.sqlite")
+        + f'\noverpass_cache = "{tmp_path / "overpass"}"\n',
+        encoding="utf-8",
+    )
+
+    from nexttraintosee.config import load_config
+
+    config = load_config(path)
+    client = OverpassClient(cache_dir=config.data.overpass_cache)
+    query = build_query(
+        config.site.position, config.search_radius_m, anchor=config.site.anchor_position
+    )
+    cache_file = client.cache_path(query)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(_overpass_payload()), encoding="utf-8")
+    return path
+
+
+def test_tracks_lists_the_corridors(tracks_config, capsys):
+    assert run(tracks_config, "tracks") == 0
+    out = capsys.readouterr().out
+
+    assert "Sète-Ville" in out and "Bayonne" in out
+    assert "tronçon(s) OSM" in out
+    assert "120 km/h" in out
+
+
+def test_tracks_measures_the_distance_along_the_track(tracks_config, capsys):
+    assert run(tracks_config, "tracks") == 0
+    out = capsys.readouterr().out
+
+    assert "par la voie jusqu'à Toulouse Matabiau" in out
+    # Jamais plus court qu'à vol d'oiseau : c'était le symptôme du bug.
+    assert "non mesurable" not in out
+
+
+def test_tracks_maps_each_branch_to_its_corridor(tracks_config, capsys):
+    assert run(tracks_config, "tracks") == 0
+    out = capsys.readouterr().out
+
+    mapping = out[out.index("Correspondance branches") :]
+    se_line = next(l for l in mapping.splitlines() if l.strip().startswith("se "))
+    sud_line = next(l for l in mapping.splitlines() if l.strip().startswith("sud "))
+
+    assert "Sète-Ville" in se_line
+    assert "Bayonne" in sud_line
+
+
+def test_tracks_emits_a_ready_to_paste_toml_block(tracks_config, capsys):
+    import tomllib
+
+    assert run(tracks_config, "tracks") == 0
+    out = capsys.readouterr().out
+
+    block = out[out.index("[[branches]]") :]
+    parsed = tomllib.loads(block)
+    branches = {b["id"]: b for b in parsed["branches"]}
+
+    assert set(branches) == {"se", "sud", "nord", "ouest"}
+    assert branches["se"]["passes_observer"] is True
+    assert branches["se"]["track_distance_m"] > 1500
+    # Aucun corridor ne part vers le nord dans ce jeu de données.
+    assert branches["nord"]["passes_observer"] is False
+    assert "track_distance_m" not in branches["nord"]
+
+
+def test_tracks_reports_when_no_track_is_near(tmp_path, gtfs_zip, capsys):
+    import json
+
+    from nexttraintosee.config import load_config
+    from nexttraintosee.osm import OverpassClient, build_query
+
+    path = tmp_path / "empty.toml"
+    path.write_text(
+        CONFIG.format(gtfs=gtfs_zip, database=tmp_path / "j.sqlite")
+        + f'\noverpass_cache = "{tmp_path / "overpass"}"\n',
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    client = OverpassClient(cache_dir=config.data.overpass_cache)
+    query = build_query(
+        config.site.position, config.search_radius_m, anchor=config.site.anchor_position
+    )
+    cache_file = client.cache_path(query)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps({"elements": []}), encoding="utf-8")
+
+    assert run(path, "tracks") == 1
+    assert "Aucune voie ferrée" in capsys.readouterr().out

@@ -40,10 +40,21 @@ c'est aussi ce qui rend indispensable l'étape `tracks` : selon que le point est
 à 80 m d'un seul axe ou à mi-distance des deux, la configuration n'est pas la
 même.
 
-> ⚠️ Cette lecture s'appuie sur la géographie ferroviaire toulousaine et sur des
-> calculs de distance, **pas** sur la géométrie OpenStreetMap : l'environnement
-> dans lequel ce code a été écrit n'a accès ni à Overpass, ni à OSM, ni aux
-> portails SNCF. Voir [§ 6](#6-ce-qui-reste-à-vérifier).
+### Ce que la géométrie OSM a confirmé
+
+Une exécution de `tracks` sur le terrain relève **trois corridors parallèles**
+dans un rayon de 500 m — à 1 m, 383 m et 488 m du point, tous orientés
+nord-sud, tous limités à 120 km/h — nommés « Ligne de Bordeaux-Saint-Jean à
+Sète-Ville » et « Ligne de Toulouse à Bayonne ».
+
+C'est cohérent avec la description du réseau : au sud de Matabiau, la ligne de
+Saint-Agne à Auch « descend vers le sud sur environ deux kilomètres aux côtés
+d'autres lignes, dont elle se sépare aux bifurcations près du Grand-Rond et
+d'Empalot ». Le Grand-Rond est à 680 m du point.
+
+**Conséquence pratique : le point est dans le tronc commun.** Tout ce qui quitte
+Matabiau vers le sud passe devant — Narbonne, Latour-de-Carol, Bayonne, *et*
+Auch/Colomiers. Seuls les axes nord (Bordeaux, Montauban) ne passent pas.
 
 ---
 
@@ -121,14 +132,24 @@ train qui la quitte vers Narbonne, oui. Comment le savoir à partir du GTFS ?
 | Vers | Cap | Passe devant le point ? |
 | --- | ---: | --- |
 | Villefranche-de-Lauragais (axe Narbonne) | 137,5° | oui |
-| Toulouse Saint-Agne (axe Latour-de-Carol) | 184,2° | oui (à confirmer) |
-| Colomiers (axe Auch / Bayonne) | 269,8° | non |
+| Toulouse Saint-Agne (axe Latour-de-Carol, Bayonne, Auch) | 184,2° | oui |
+| Colomiers, en desserte directe (axe Auch) | 269,8° | **oui** |
 | Montauban (axe Bordeaux) | 348,6° | non |
 
 Les quatre secteurs sont largement séparés : un simple secteur angulaire autour
 de chaque cap suffit à rattacher n'importe quelle circulation à sa branche, sans
 avoir à énumérer les gares une par une. C'est robuste aux évolutions de
 desserte, et ça se configure en quatre lignes de TOML.
+
+**Le piège de la méthode**, et il est réel ici : le cap vers l'arrêt voisin n'est
+la direction de départ que si cet arrêt est dans le prolongement de la voie.
+Colomiers est plein **ouest** de Matabiau, mais les trains qui s'y rendent
+partent vers le **sud** — la ligne de Saint-Agne à Auch descend avec les autres,
+bifurque à l'ouest après Saint-Agne, puis remonte vers Saint-Cyprien-Arènes. Une
+desserte directe Matabiau → Colomiers affiche donc un cap de 270° tout en
+passant devant le point. D'où `passes_observer = true` sur cette branche, malgré
+son cap. La règle à retenir : **c'est la géométrie mesurée par `tracks` qui
+tranche, pas le cap.**
 
 ### Trois régimes de marche, pas un
 
@@ -197,47 +218,43 @@ savoir.
 
 ---
 
-## 6. Ce qui reste à vérifier
+## 6. Régler la configuration à partir de `tracks`
 
-L'environnement de rédaction n'avait accès ni à Overpass, ni à OpenStreetMap, ni
-aux portails SNCF : la géométrie exacte des voies au droit du point **n'a pas pu
-être mesurée**. Trois valeurs de la configuration sont donc des estimations,
-explicitement marquées « À MESURER » / « À VÉRIFIER » :
-
-1. **`track_distance_m` de chaque branche** — distance *le long de la voie*
-   entre Matabiau et le point. L'estimation actuelle (1 650 m) est la distance à
-   vol d'oiseau (1 534 m) majorée d'une sinuosité de 5 %. La vraie valeur peut
-   en différer de 100 à 200 m en sortie de gare, soit 5 à 10 s.
-2. **`passes_observer` de la branche `sud`** — l'axe de Latour-de-Carol
-   passe-t-il réellement devant ce point, ou s'écarte-t-il vers l'ouest avant ?
-   Si la réponse est non, il faut le passer à `false`, sinon la moitié des
-   prédictions seront fausses.
-3. **La vitesse limite locale** — 90 km/h est une hypothèse prudente pour une
-   sortie de gare urbaine.
-
-Une seule commande règle les trois :
+`nexttraintosee tracks` interroge Overpass, regroupe les voies en corridors
+parallèles, mesure pour chacun la distance **le long de la voie** jusqu'à la
+gare d'appui, détermine vers où il repart, et imprime enfin le bloc
+`[[branches]]` prêt à coller :
 
 ```bash
 nexttraintosee tracks -c config/toulouse-guilhemery.toml
 ```
 
-Elle interroge Overpass (puis met en cache, la géométrie ne bouge pas), regroupe
-les voies en corridors parallèles, et affiche pour chacun sa distance au point,
-son axe, son nombre de voies, sa vitesse limite, et la distance curviligne
-jusqu'à Matabiau — soit très exactement les valeurs à reporter dans le TOML.
+Deux garde-fous y sont intégrés, tous deux nés d'erreurs constatées :
 
-À défaut, la même requête à la main sur <https://overpass-turbo.eu/> :
+* **Distance non mesurable.** Une distance sur la voie ne peut pas être plus
+  courte qu'à vol d'oiseau. Quand la géométrie récupérée n'atteint pas la gare,
+  la projection est bornée à l'extrémité de la polyligne et la valeur devient
+  absurde. L'outil le détecte et refuse de publier le chiffre au lieu de le
+  présenter comme mesuré. La requête Overpass balaie désormais tout le couloir
+  entre le point et la gare, ce qui évite le cas dans la quasi-totalité des
+  situations ; si le message apparaît malgré tout, augmentez `search_radius_m`
+  et relancez avec `--refresh`.
+* **Chaînes qui changent de ligne.** Dans une gare, toutes les lignes partagent
+  des nœuds : une polyligne reconstituée naïvement traverse la gare et repart
+  sur la ligne voisine. Chaque corridor est donc amorcé sur ses propres voies,
+  puis prolongé uniquement par les tronçons qui le continuent sans virage
+  brusque.
 
-```overpassql
-[out:json][timeout:90];
-(
-  way(around:500,43.597833,1.458194)["railway"~"^(rail|light_rail|narrow_gauge)$"];
-  node(around:2000,43.597833,1.458194)["railway"~"^(station|halt)$"];
-);
-out tags geom;
-```
+Deux choses restent à votre appréciation, parce qu'aucune donnée ne les décide :
 
----
+1. **`passes_observer` pour un corridor éloigné.** L'outil dit qu'un corridor
+   est à 488 m ; savoir si vous le voyez depuis votre position — bâti, végétation,
+   tranchée — n'appartient qu'à vous. Dans le doute, laissez `true` : le capteur
+   tranchera, une branche à tort visible produit des prédictions qui n'arrivent
+   jamais et ressort dans `unmatched_passages`.
+2. **Le nombre réel de voies.** L'outil affiche des *tronçons OSM*, pas des
+   voies physiques : OSM découpe une même voie à chaque pont ou changement de
+   vitesse. La largeur du faisceau est plus parlante, et elle est affichée aussi.
 
 ## Sources
 

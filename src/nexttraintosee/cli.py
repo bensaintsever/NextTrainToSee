@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import AppConfig, ConfigError, load_config
-from .geo import haversine_m
+from .geo import bearing_distance_deg
 from .gtfs import GtfsError, GtfsFeed
 from .matching import calibrate, fit_profile, match_detections, runs_from_matches
 from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops
@@ -92,13 +92,73 @@ def _collect_passages(
 # -- commandes ---------------------------------------------------------------
 
 
+def suggest_branches(config: AppConfig, corridors) -> list[tuple]:
+    """Associe chaque branche configurée au corridor qui lui correspond.
+
+    Une branche est définie par le cap sous lequel on quitte la gare d'appui ;
+    un corridor sait vers où il part une fois passé le point d'observation. On
+    apparie les deux, et une branche sans corridor est une branche qui ne passe
+    pas devant le point.
+
+    Returns:
+        Un couple (branche, corridor ou None, lien vers la gare ou None) par
+        branche configurée.
+    """
+    anchor = config.site.anchor_position
+    links = {}
+    if anchor is not None:
+        links = {corridor.corridor_id: corridor.link_to(anchor) for corridor in corridors}
+
+    suggestions = []
+    for branch in config.site.branches:
+        best = None
+        for corridor in corridors:
+            link = links.get(corridor.corridor_id)
+            if link is None or link.outbound_bearing_deg is None:
+                continue
+            gap = bearing_distance_deg(branch.bearing_deg, link.outbound_bearing_deg)
+            if gap <= branch.tolerance_deg and (best is None or gap < best[0]):
+                best = (gap, corridor, link)
+        suggestions.append((branch, best[1] if best else None, best[2] if best else None))
+    return suggestions
+
+
+def render_branch_toml(suggestions) -> str:
+    """Bloc TOML prêt à coller, déduit de la géométrie mesurée."""
+    lines = []
+    for branch, corridor, link in suggestions:
+        lines.append("[[branches]]")
+        lines.append(f'id = "{branch.branch_id}"')
+        lines.append(f'label = "{branch.label}"')
+        lines.append(f"bearing_deg = {branch.bearing_deg}")
+        if corridor is None:
+            lines.append("passes_observer = false   # aucun corridor ne part dans cette direction")
+        else:
+            lines.append("passes_observer = true")
+            if link is not None and link.is_plausible:
+                lines.append(
+                    f"track_distance_m = {link.along_distance_m:.0f}"
+                    f"   # corridor {corridor.corridor_id}, à {corridor.distance_m:.0f} m du point"
+                )
+            else:
+                lines.append(
+                    f"# track_distance_m : non mesurable pour le corridor "
+                    f"{corridor.corridor_id} (géométrie incomplète)"
+                )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 def cmd_tracks(args: argparse.Namespace) -> int:
     """Résout la géométrie ferroviaire autour du point via OpenStreetMap."""
     config = _load(args)
     client = OverpassClient(cache_dir=config.data.overpass_cache)
     try:
         ways, stops = client.around(
-            config.site.position, radius_m=config.search_radius_m, refresh=args.refresh
+            config.site.position,
+            radius_m=config.search_radius_m,
+            refresh=args.refresh,
+            anchor=config.site.anchor_position,
         )
     except OverpassError as exc:
         print(f"Overpass : {exc}", file=sys.stderr)
@@ -114,28 +174,62 @@ def cmd_tracks(args: argparse.Namespace) -> int:
         print(f"Aucune voie ferrée à moins de {config.search_radius_m:.0f} m du point.")
         return 1
 
+    anchor = config.site.anchor_position
     print(f"Point : {config.site.position[0]:.6f}, {config.site.position[1]:.6f}")
     print(f"{len(corridors)} corridor(s) dans un rayon de {config.search_radius_m:.0f} m :\n")
+
     for corridor in corridors:
         speed = f"{corridor.maxspeed_kmh:.0f} km/h" if corridor.maxspeed_kmh else "vitesse inconnue"
+        print(f"  [{corridor.corridor_id}] {corridor.label}")
         print(
-            f"  [{corridor.corridor_id}] {corridor.label}\n"
-            f"      {corridor.distance_m:6.0f} m du point · {corridor.track_count} voie(s) "
-            f"· axe {corridor.axis_deg:.0f}° · {speed}"
+            f"      {corridor.distance_m:6.0f} m du point · axe {corridor.axis_deg:.0f}° "
+            f"· {speed} · {corridor.segment_count} tronçon(s) OSM "
+            f"sur {corridor.lateral_spread_m:.0f} m de large"
         )
-        if config.site.anchor_position:
-            along = corridor.along_distance_to_m(config.site.anchor_position)
-            crow = haversine_m(config.site.position, config.site.anchor_position)
-            print(
-                f"      distance à {config.site.anchor_station} : {along:.0f} m par la voie "
-                f"({crow:.0f} m à vol d'oiseau) → track_distance_m = {along:.0f}"
-            )
+        if anchor is None:
+            print("      (renseignez anchor_lat / anchor_lon pour mesurer la distance à la gare)")
+        else:
+            link = corridor.link_to(anchor)
+            if link.is_plausible:
+                heading = (
+                    f", repart au cap {link.outbound_bearing_deg:.0f}°"
+                    if link.outbound_bearing_deg is not None
+                    else ""
+                )
+                print(
+                    f"      {link.along_distance_m:.0f} m par la voie jusqu'à "
+                    f"{config.site.anchor_station} ({link.straight_distance_m:.0f} m à vol "
+                    f"d'oiseau){heading}"
+                )
+            else:
+                print(
+                    f"      ⚠ distance à {config.site.anchor_station} non mesurable : la "
+                    f"géométrie s'arrête à {link.anchor_offset_m:.0f} m de la gare."
+                )
+                print("        Augmentez search_radius_m, puis relancez avec --refresh.")
         print()
 
     if stops:
-        print("Gares OSM les plus proches :")
+        print("Gares ferroviaires les plus proches :")
         for stop, distance in nearest_stops(stops, config.site.position, limit=4):
             print(f"  {distance:6.0f} m  {stop.name or '(sans nom)'} [{stop.kind}]")
+        print()
+
+    if anchor is not None:
+        suggestions = suggest_branches(config, corridors)
+        print("Correspondance branches ↔ corridors :\n")
+        for branch, corridor, link in suggestions:
+            if corridor is None:
+                print(f"  {branch.branch_id:8s} (cap {branch.bearing_deg:5.1f}°) → aucun corridor")
+            else:
+                heading = link.outbound_bearing_deg if link else None
+                print(
+                    f"  {branch.branch_id:8s} (cap {branch.bearing_deg:5.1f}°) → "
+                    f"{corridor.corridor_id} « {corridor.label} » "
+                    f"(repart au cap {heading:.0f}°)"
+                )
+        print("\nÀ recopier dans votre configuration, en remplacement de vos sections de branches :\n")
+        print(render_branch_toml(suggestions))
     return 0
 
 
