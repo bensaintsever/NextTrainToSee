@@ -11,6 +11,7 @@ pour ne rien ajouter aux dépendances.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any
 
 from .motion import TractionProfile
 from .osm import DEFAULT_LOOKAHEAD_M
-from .predict import Branch, Site
+from .predict import Branch, Site, TrainCategory
 from .realtime import SNCF_TRIP_UPDATES_URL
 
 
@@ -111,6 +112,27 @@ def parse_config(raw: dict[str, Any], base_dir: Path | None = None) -> AppConfig
             "passes_observer = true"
         )
 
+    categories = tuple(
+        TrainCategory(
+            category_id=str(_require(table, "id", "categories")),
+            label=str(table.get("label", table["id"])),
+            pattern=str(_require(table, "pattern", "categories")),
+            accel_ms2=float(table["accel_ms2"]) if "accel_ms2" in table else None,
+            decel_ms2=float(table["decel_ms2"]) if "decel_ms2" in table else None,
+            line_speed_kmh=(
+                float(table["line_speed_kmh"]) if "line_speed_kmh" in table else None
+            ),
+        )
+        for table in raw.get("categories", [])
+    )
+    for category in categories:
+        try:
+            re.compile(category.pattern)
+        except re.error as exc:
+            raise ConfigError(
+                f"motif invalide pour la catégorie « {category.category_id} » : {exc}"
+            ) from exc
+
     anchor_position = None
     if "anchor_lat" in site_table and "anchor_lon" in site_table:
         anchor_position = (float(site_table["anchor_lat"]), float(site_table["anchor_lon"]))
@@ -122,6 +144,7 @@ def parse_config(raw: dict[str, Any], base_dir: Path | None = None) -> AppConfig
         anchor_position=anchor_position,
         branches=branches,
         profile=profile,
+        categories=categories,
     )
 
     data_table = raw.get("data", {})

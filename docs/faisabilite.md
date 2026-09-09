@@ -243,9 +243,30 @@ Trois enseignements :
    modèle reste donc ancré sur l'heure en gare d'appui, et l'horaire ne sert
    qu'au contrôle.
 
+### Ce que les horaires ne peuvent pas caler
+
+Le décompte des circulations desservant Matabiau range 303 segments en TER
+omnibus et 67 en grandes lignes. **Aucune de ces 67 ne s'arrête à Saint-Agne ni
+à Montaudran** : elles traversent. Les vitesses de 113 et 66 km/h mesurées
+ci-dessus sont donc des vitesses *d'omnibus*, et les appliquer à un Intercités
+qui ne s'arrête pas serait une erreur — d'autant que le 66 km/h de l'axe de
+Montaudran intègre le freinage vers une halte que ce train ne dessert pas.
+
+D'où les `[[categories]]` : le profil du matériel l'emporte sur celui de la
+branche. Pour les grandes lignes, faute de segment mesurable, il reste une
+estimation explicitement signalée — la limite d'infrastructure relevée sur OSM
+(120 km/h) et l'accélération plus faible d'une rame tractée. Seul un capteur
+tranchera.
+
+Une dernière précaution : un segment dont **tous** les horaires sont identiques
+ne renseigne sur rien. Son minimum est une allocation standard reconduite d'un
+train à l'autre, pas une marche tendue. L'outil mesure donc l'étendue des temps
+et refuse d'ajuster quoi que ce soit en dessous d'une minute d'écart.
+
 Cette vérification ne demande ni capteur ni présence sur place, mais elle a ses
-limites : elle valide la **marche**, pas l'heure de passage, et ne voit aucune
-circulation absente des horaires.
+limites : elle valide la **marche**, pas l'heure de passage, ne concerne que les
+matériels qui s'arrêtent à proximité, et ne voit aucune circulation absente des
+horaires.
 
 ## 5. Ce que ce système ne saura jamais faire seul
 

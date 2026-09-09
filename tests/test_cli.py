@@ -485,6 +485,17 @@ def test_validate_can_suggest_a_line_speed_per_branch(tracks_config, capsys):
     assert all("line_speed_kmh" in b for b in parsed["branches"])
 
 
+def test_validate_refuses_to_fit_on_segments_without_a_tight_run(tracks_config, capsys):
+    # L'axe sud-est du mini-GTFS n'a qu'une circulation : aucune étendue, donc
+    # son minimum n'est qu'une allocation standard et ne peut rien caler.
+    assert run(tracks_config, "validate", "--min-trips", "1", "--day", "2026-09-09", "--fit") == 0
+    out = capsys.readouterr().out
+
+    block = out[out.index("branche par branche") :]
+    assert 'id = "se"' not in block
+    assert 'id = "sud"' in block
+
+
 def test_validate_needs_enough_trips_to_be_meaningful(tracks_config, capsys):
     # Le mini-GTFS n'a qu'une circulation par segment.
     assert run(tracks_config, "validate", "--min-trips", "50", "--day", "2026-09-09") == 1
@@ -499,3 +510,23 @@ def test_validate_reports_a_missing_gtfs(tmp_path, capsys):
     )
     assert run(path, "validate") == 2
     assert "GTFS absente" in capsys.readouterr().err
+
+
+def test_validate_says_which_categories_it_cannot_calibrate(tracks_config, tmp_path, capsys):
+    path = tmp_path / "with-categories.toml"
+    path.write_text(
+        tracks_config.read_text(encoding="utf-8")
+        + '\n[[categories]]\nid = "ter"\nlabel = "TER"\npattern = "Narbonne|Latour|Auch"\n'
+        + '\n[[categories]]\nid = "gl"\nlabel = "Grandes lignes"\npattern = "Colomiers"\n',
+        encoding="utf-8",
+    )
+    assert run(path, "validate", "--min-trips", "1", "--day", "2026-09-09") == 0
+    out = capsys.readouterr().out
+
+    assert "par type de matériel" in out
+    assert "aucun segment mesurable" in out
+
+
+def test_validate_reports_the_spread_of_each_segment(tracks_config, capsys):
+    assert run(tracks_config, "validate", "--min-trips", "1", "--day", "2026-09-09") == 0
+    assert "étendue" in capsys.readouterr().out

@@ -26,7 +26,7 @@ from .geo import LatLon, initial_bearing_deg, project_on_polyline
 from .gtfs import GtfsFeed
 from .motion import segment_time_s
 from .osm import Corridor
-from .predict import Site
+from .predict import Site, trip_descriptor
 
 #: Au-delà, on considère que l'arrêt n'est pas sur le corridor examiné.
 MAX_STOP_OFFSET_M = 300.0
@@ -46,6 +46,13 @@ class SegmentCheck:
     median_s: float
     modelled_s: float
     covers_observer: bool
+    spread_s: float = 0.0
+    """Étendue des temps horaires sur le segment.
+
+    Une étendue nulle signale une allocation standard reconduite d'un train à
+    l'autre : le minimum n'y est alors pas une marche tendue, et ne dit rien de
+    la limite physique.
+    """
     branch_id: str | None = None
     """Branche à laquelle ce segment se rattache, si elle est identifiable."""
     line_speed_kmh: float | None = None
@@ -77,6 +84,11 @@ class SegmentCheck:
     @property
     def is_consistent(self) -> bool:
         return self.verdict == "cohérent"
+
+    @property
+    def has_tight_run(self) -> bool:
+        """Vrai si les horaires varient assez pour que le minimum ait un sens."""
+        return self.spread_s >= 60.0
 
 
 def place_stop_on_corridors(
@@ -185,6 +197,7 @@ def check_segments(
                 trip_count=len(times),
                 fastest_s=min(times),
                 median_s=statistics.median(times),
+                spread_s=max(times) - min(times),
                 modelled_s=segment_time_s(length_m, profile),
                 covers_observer=covers,
                 branch_id=branch.branch_id if branch else None,
@@ -205,3 +218,67 @@ def format_duration(seconds: float) -> str:
     sign = "-" if seconds < 0 else ""
     total = int(round(abs(seconds)))
     return f"{sign}{total // 60} min {total % 60:02d} s"
+
+
+@dataclass(frozen=True)
+class CategoryCoverage:
+    """Ce que les horaires permettent — ou non — de caler, pour un type de matériel."""
+
+    category_id: str
+    label: str
+    segment_count: int
+    """Segments de cette catégorie au départ ou à l'arrivée de la gare d'appui."""
+    calibratable_count: int
+    """Ceux dont l'arrêt voisin est encadré par un segment mesurable."""
+
+    @property
+    def is_calibratable(self) -> bool:
+        return self.calibratable_count > 0
+
+
+def category_coverage(
+    feed: GtfsFeed, site: Site, checked_neighbours: set[str], day: date
+) -> list[CategoryCoverage]:
+    """Dit quelles catégories les horaires permettent de caler.
+
+    Une catégorie dont aucune circulation ne s'arrête à une gare voisine
+    mesurable ne peut pas être calée sur les horaires : son profil reste une
+    estimation jusqu'à ce qu'un capteur la mesure. C'est le cas des trains de
+    grandes lignes, qui traversent les haltes de banlieue sans s'y arrêter.
+    """
+    anchor_stop_ids = sorted(feed.station_stop_ids(site.anchor_station))
+    totals: dict[str, int] = {}
+    calibratable: dict[str, int] = {}
+
+    for trip in feed.trips_on(day):
+        if not feed.is_rail(trip):
+            continue
+        index = trip.index_of_stop(anchor_stop_ids)
+        if index is None:
+            continue
+        route = feed.routes.get(trip.route_id)
+        category = site.category_for(trip_descriptor(trip, route))
+        key = category.category_id if category else "(non classé)"
+        for offset in (-1, 1):
+            neighbour_index = index + offset
+            if not 0 <= neighbour_index < len(trip.stop_times):
+                continue
+            stop = feed.stops.get(trip.stop_times[neighbour_index].stop_id)
+            if stop is None:
+                continue
+            totals[key] = totals.get(key, 0) + 1
+            if stop.name in checked_neighbours:
+                calibratable[key] = calibratable.get(key, 0) + 1
+
+    labels = {c.category_id: c.label for c in site.categories}
+    coverage = [
+        CategoryCoverage(
+            category_id=key,
+            label=labels.get(key, key),
+            segment_count=count,
+            calibratable_count=calibratable.get(key, 0),
+        )
+        for key, count in totals.items()
+    ]
+    coverage.sort(key=lambda c: -c.segment_count)
+    return coverage

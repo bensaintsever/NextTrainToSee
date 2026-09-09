@@ -54,6 +54,10 @@ TRIPS = [
     ("T:SE:THRU", "R:SE", "S:WEEKDAY", "Narbonne", "0"),
     # Ne dessert pas la gare d'appui : doit être écartée dès le chargement.
     ("T:ELSEWHERE", "R:N", "S:WEEKDAY", "Colomiers", "0"),
+    # Deux marches contrastées sur le même segment, pour que l'étendue des
+    # horaires soit exploitable : sans écart, le minimum n'est qu'une allocation.
+    ("T:S:FAST", "R:S", "S:WEEKDAY", "Latour-de-Carol", "0"),
+    ("T:S:SLOW", "R:S", "S:WEEKDAY", "Latour-de-Carol", "0"),
 ]
 
 STOP_TIMES = [
@@ -82,6 +86,12 @@ STOP_TIMES = [
     ("T:SE:THRU", "SP:VLF:1", 3, "13:15:00", "13:16:00", "0", "0"),
     ("T:ELSEWHERE", "SP:MTB_N:1", 1, "14:00:00", "14:01:00", "0", "0"),
     ("T:ELSEWHERE", "SP:COL:1", 2, "14:40:00", "14:41:00", "0", "0"),
+    # Marche tendue : 4 minutes.
+    ("T:S:FAST", "SP:MTB:2", 1, "15:00:00", "15:02:00", "0", "0"),
+    ("T:S:FAST", "SP:STA:1", 2, "15:06:00", "15:07:00", "0", "0"),
+    # Marche détendue : 9 minutes, même segment.
+    ("T:S:SLOW", "SP:MTB:2", 1, "16:00:00", "16:02:00", "0", "0"),
+    ("T:S:SLOW", "SP:STA:1", 2, "16:11:00", "16:12:00", "0", "0"),
 ]
 
 CALENDAR = [

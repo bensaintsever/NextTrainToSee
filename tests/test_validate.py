@@ -95,7 +95,12 @@ def test_check_reports_the_gap_between_model_and_fastest_schedule(feed, site, co
     assert "Toulouse Saint-Agne" in by_name
     saint_agne = by_name["Toulouse Saint-Agne"]
     assert saint_agne.covers_observer is True
-    assert saint_agne.fastest_s == 360.0
+    # Trois marches sur ce segment : 4, 6 et 9 minutes.
+    assert saint_agne.trip_count == 3
+    assert saint_agne.fastest_s == 240.0
+    assert saint_agne.median_s == 360.0
+    assert saint_agne.spread_s == 300.0
+    assert saint_agne.has_tight_run
     assert saint_agne.modelled_s > 0
 
 
@@ -179,3 +184,83 @@ def test_durations_round_on_the_total_not_on_the_seconds():
 
 def test_negative_durations_keep_their_sign():
     assert format_duration(-92.0) == "-1 min 32 s"
+
+
+# -- fiabilité du minimum horaire ---------------------------------------------
+
+
+def test_a_segment_with_varied_timings_has_a_tight_run():
+    check = SegmentCheck(
+        neighbour="X", length_m=4000.0, trip_count=40, fastest_s=180.0,
+        median_s=240.0, modelled_s=180.0, covers_observer=True, spread_s=300.0,
+    )
+    assert check.has_tight_run
+
+
+def test_a_segment_where_every_train_takes_the_same_time_has_none():
+    # Tous les horaires identiques : c'est une allocation standard reconduite,
+    # pas une marche tendue. Le minimum ne dit rien de la limite physique.
+    check = SegmentCheck(
+        neighbour="X", length_m=4000.0, trip_count=40, fastest_s=300.0,
+        median_s=300.0, modelled_s=300.0, covers_observer=True, spread_s=0.0,
+    )
+    assert not check.has_tight_run
+
+
+def test_spread_is_measured_on_the_collected_times(feed, site, corridors):
+    checks = check_segments(feed, corridors, site, WEEKDAY, min_trips=1)
+    assert all(c.spread_s >= 0 for c in checks)
+
+
+# -- ce que les horaires permettent de caler ----------------------------------
+
+
+def _with_categories(site):
+    from dataclasses import replace
+
+    from nexttraintosee.predict import TrainCategory
+
+    return replace(
+        site,
+        categories=(
+            TrainCategory("ter", "TER", r"Latour|Narbonne|Auch"),
+            TrainCategory("gl", "Grandes lignes", r"Colomiers"),
+        ),
+    )
+
+
+def test_coverage_counts_segments_per_category(feed, site):
+    from nexttraintosee.validate import category_coverage
+
+    coverage = {c.category_id: c for c in category_coverage(
+        feed, _with_categories(site), {"Toulouse Saint-Agne"}, WEEKDAY
+    )}
+    assert "ter" in coverage
+    assert coverage["ter"].segment_count > 0
+
+
+def test_a_category_that_never_stops_nearby_is_not_calibratable(feed, site):
+    from nexttraintosee.validate import category_coverage
+
+    coverage = {c.category_id: c for c in category_coverage(
+        feed, _with_categories(site), {"Toulouse Saint-Agne"}, WEEKDAY
+    )}
+    # Les circulations de Colomiers ne desservent pas Saint-Agne.
+    assert coverage["gl"].is_calibratable is False
+    assert coverage["ter"].is_calibratable is True
+
+
+def test_unclassified_trips_are_reported_separately(feed, site):
+    from nexttraintosee.validate import category_coverage
+
+    coverage = {c.category_id for c in category_coverage(feed, site, set(), WEEKDAY)}
+    # Sans catégorie déclarée, tout tombe dans le fourre-tout.
+    assert coverage == {"(non classé)"}
+
+
+def test_coverage_is_ordered_by_weight(feed, site):
+    from nexttraintosee.validate import category_coverage
+
+    coverage = category_coverage(feed, _with_categories(site), {"Toulouse Saint-Agne"}, WEEKDAY)
+    counts = [c.segment_count for c in coverage]
+    assert counts == sorted(counts, reverse=True)

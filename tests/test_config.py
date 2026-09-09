@@ -153,3 +153,53 @@ def test_the_shipped_toulouse_configuration_loads():
     # est pourtant plein ouest. Seul l'axe nord est exclu.
     assert visible == ["se", "sud", "ouest"]
     assert config.site.profile.line_speed_kmh == 120.0
+
+
+def test_categories_are_read_with_their_overrides():
+    config = parse(
+        MINIMAL
+        + """
+[[categories]]
+id = "ter"
+label = "TER Occitanie"
+pattern = "\\\\b8\\\\d{5}\\\\b"
+accel_ms2 = 0.5
+
+[[categories]]
+id = "gl"
+pattern = "\\\\b\\\\d{4}\\\\b"
+line_speed_kmh = 120
+"""
+    )
+    ter, gl = config.site.categories
+    assert ter.label == "TER Occitanie"
+    assert ter.accel_ms2 == 0.5 and ter.line_speed_kmh is None
+    assert gl.label == "gl"
+    assert gl.line_speed_kmh == 120.0
+    assert ter.matches("870300") and not ter.matches("4756")
+
+
+def test_a_configuration_without_categories_is_valid():
+    assert parse(MINIMAL).site.categories == ()
+
+
+def test_a_category_without_a_pattern_is_reported():
+    with pytest.raises(ConfigError, match="pattern"):
+        parse(MINIMAL + '\n[[categories]]\nid = "ter"\n')
+
+
+def test_an_invalid_pattern_is_reported_with_its_category():
+    with pytest.raises(ConfigError, match="motif invalide.*ter"):
+        parse(MINIMAL + '\n[[categories]]\nid = "ter"\npattern = "(non fermé"\n')
+
+
+def test_the_shipped_configuration_separates_omnibus_from_through_trains():
+    config = load_config(Path(__file__).resolve().parents[1] / "config" / "toulouse-guilhemery.toml")
+    categories = {c.category_id: c for c in config.site.categories}
+
+    assert set(categories) == {"ter", "grandes-lignes"}
+    assert categories["ter"].matches("870300 C5 Toulouse Matabiau - Auch")
+    assert categories["grandes-lignes"].matches("4756 560B Bordeaux - Marseille")
+    # Les trains sans arrêt ne doivent pas hériter de la vitesse des omnibus.
+    assert categories["grandes-lignes"].line_speed_kmh == 120.0
+    assert categories["ter"].line_speed_kmh is None

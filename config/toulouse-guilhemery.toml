@@ -77,6 +77,36 @@ passes_observer = true
 track_distance_m = 1564.0   # même tronc commun que la branche « sud »
 line_speed_kmh = 113.0      # idem
 
+# --- Types de matériel ------------------------------------------------------
+# Les circulations sont rattachées à la première catégorie dont le motif
+# reconnaît leur désignation (numéro, code et intitulé de ligne). Le profil
+# d'une catégorie l'emporte sur celui de la branche : une vitesse de branche est
+# calée sur les omnibus qui desservent les haltes de l'axe, et n'a pas à
+# s'imposer à un train qui les traverse.
+
+[[categories]]
+id = "ter"
+label = "TER Occitanie (omnibus)"
+pattern = "\\b8\\d{5}\\b"
+# Vitesse laissée à la branche : 113 km/h vers Saint-Agne, 66 vers Montaudran,
+# mesurées sur les horaires les plus tendus de ces omnibus.
+accel_ms2 = 0.5
+decel_ms2 = 0.6
+
+[[categories]]
+id = "grandes-lignes"
+label = "Intercités / TGV (sans arrêt)"
+pattern = "\\b\\d{4,5}\\b"
+# ESTIMATION, non mesurable sur les horaires : ces trains ne s'arrêtent ni à
+# Saint-Agne ni à Montaudran, donc aucun segment encadrant le point ne les
+# concerne. Ils traversent sans s'arrêter, la vitesse de branche calée sur les
+# omnibus ne s'applique donc pas — on retient la limite d'infrastructure relevée
+# sur OSM. L'accélération est celle d'une rame tractée, plus lente qu'un
+# automoteur. À confirmer au capteur.
+accel_ms2 = 0.35
+decel_ms2 = 0.50
+line_speed_kmh = 120.0
+
 [data]
 gtfs_path = "../data/sncf-gtfs.zip"
 overpass_cache = "../cache/overpass"

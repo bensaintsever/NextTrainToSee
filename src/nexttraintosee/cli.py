@@ -20,7 +20,7 @@ from .sensor.base import PassageDetector
 from .sensor.replay import read_levels
 from .sensor.session import Status, listen_session
 from .store import Store
-from .validate import check_segments, format_duration
+from .validate import category_coverage, check_segments, format_duration
 
 log = logging.getLogger("nexttraintosee")
 
@@ -503,7 +503,15 @@ def cmd_validate(args: argparse.Namespace) -> int:
             f"      modèle                  {format_duration(check.modelled_s):>12s}"
             f"   écart {check.gap_s:+.0f} s — {check.verdict}"
         )
-        print(f"      marge horaire médiane   {format_duration(check.median_padding_s):>12s}")
+        print(
+            f"      marge horaire médiane   {format_duration(check.median_padding_s):>12s}"
+            f"   étendue {format_duration(check.spread_s)}"
+        )
+        if not check.has_tight_run:
+            print(
+                "      ⚠ tous les horaires sont identiques : le minimum est une allocation"
+            )
+            print("        standard, pas une marche tendue — à ne pas prendre pour une limite.")
         print()
 
     if spanning:
@@ -511,6 +519,18 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(
             f"{consistent} segment(s) cohérent(s) sur {len(spanning)} qui encadrent le point.\n"
         )
+    spanning_names = {c.neighbour for c in spanning}
+    coverage = category_coverage(feed, config.site, spanning_names, day)
+    if coverage:
+        print("Ce que les horaires permettent de caler, par type de matériel :\n")
+        for entry in coverage:
+            if entry.is_calibratable:
+                verdict = f"{entry.calibratable_count} segments mesurables"
+            else:
+                verdict = "aucun segment mesurable — profil estimé, à confirmer au capteur"
+            print(f"  {entry.label:28s} {entry.segment_count:4d} segments · {verdict}")
+        print()
+
     if args.fit:
         _print_speed_fit(config, feed, checks)
 
@@ -539,12 +559,18 @@ def _print_speed_fit(config: AppConfig, feed, checks) -> None:
         branch = config.site.branch_for(initial_bearing_deg(anchor, stops[0].position))
         if branch is None:
             continue
+        if not check.has_tight_run:
+            continue
         speed = fit_line_speed_kmh(check.length_m, check.fastest_s, config.site.profile)
         # Le segment le plus long contraint le mieux la vitesse de palier.
         if branch.branch_id not in suggestions or check.length_m > suggestions[branch.branch_id][1].length_m:
             suggestions[branch.branch_id] = (speed, check)
 
     if not suggestions:
+        print(
+            "Aucune vitesse proposée : les segments disponibles n'ont pas d'horaire\n"
+            "assez tendu pour approcher la limite physique.\n"
+        )
         return
 
     print("Vitesse de ligne ajustée sur l'horaire le plus rapide, branche par branche :\n")

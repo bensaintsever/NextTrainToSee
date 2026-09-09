@@ -154,6 +154,28 @@ ne convenait pas : l'axe de Saint-Agne tient 113 km/h, celui de Montaudran
 plafonne à 66 km/h, très en deçà des 120 km/h de l'infrastructure. `--fit`
 propose ces valeurs, branche par branche.
 
+Deux garde-fous évitent d'en conclure trop :
+
+* **Un segment dont tous les horaires sont identiques ne dit rien.** Son minimum
+  est une allocation standard reconduite, pas une marche tendue : `--fit` s'y
+  refuse et l'explique.
+* **Une catégorie de train qui ne s'arrête nulle part à proximité n'est pas
+  calable.** À Toulouse, aucun Intercités ni TGV ne dessert Saint-Agne ou
+  Montaudran : leur profil reste une estimation, et `validate` le dit.
+
+## Types de matériel
+
+Un automoteur régional, une rame tractée et une rame à grande vitesse n'ont ni
+la même accélération ni la même vitesse pratique en sortie de gare. Les
+`[[categories]]` de la configuration rattachent chaque circulation à un profil,
+d'après son numéro et l'intitulé de sa ligne.
+
+L'ordre des couches compte : profil du site, puis vitesse de la branche, puis
+matériel — le plus précis l'emporte. C'est nécessaire, car une vitesse de branche
+est calée sur les omnibus qui desservent les haltes de l'axe. Sans cette
+distinction, un Intercités traversant sans arrêt héritait des 66 km/h d'un
+omnibus qui, lui, freine pour s'arrêter à Montaudran.
+
 ## Le capteur
 
 Le détecteur (`nexttraintosee.sensor`) travaille sur un **niveau scalaire**, pas
@@ -175,7 +197,7 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 244 tests, sans réseau), et la
+Le noyau est écrit et testé (`python -m pytest`, 268 tests, sans réseau), et la
 chaîne complète a tourné sur les données réelles : géométrie OpenStreetMap
 résolue, horaires SNCF chargés, retards temps réel appliqués, modèle de marche
 confronté aux horaires.

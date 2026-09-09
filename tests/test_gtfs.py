@@ -74,6 +74,8 @@ def test_load_keeps_only_trips_calling_at_the_anchor(gtfs_zip):
         "T:BUS:1",
         "T:SE:2",
         "T:SE:THRU",
+        "T:S:FAST",
+        "T:S:SLOW",
     }
 
 

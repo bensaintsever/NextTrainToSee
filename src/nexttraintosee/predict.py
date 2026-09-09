@@ -22,13 +22,14 @@ que le capteur local vient compléter.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Sequence
 
 from .geo import LatLon, bearing_distance_deg, haversine_m, initial_bearing_deg
-from .gtfs import GtfsFeed, StopTime, Trip, service_datetime
+from .gtfs import GtfsFeed, Route, StopTime, Trip, service_datetime
 from .motion import Regime, TractionProfile, speed_at_point_ms, travel_time_s, travel_time_uncertainty_s
 
 log = logging.getLogger(__name__)
@@ -80,6 +81,42 @@ class Branch:
 
 
 @dataclass(frozen=True)
+class TrainCategory:
+    """Un type de matériel, reconnu à ce que le flux dit de la circulation.
+
+    Un automoteur régional, une rame tractée d'Intercités et une rame à grande
+    vitesse n'ont ni la même accélération ni la même vitesse pratique en sortie
+    de gare. Les distinguer importe d'autant plus que les circulations qui ne
+    s'arrêtent pas aux haltes voisines — précisément les Intercités et les TGV —
+    échappent au calage sur les horaires : leur profil ne peut être qu'estimé,
+    puis mesuré au capteur.
+    """
+
+    category_id: str
+    label: str
+    pattern: str
+    """Expression régulière cherchée dans la désignation de la circulation."""
+    accel_ms2: float | None = None
+    decel_ms2: float | None = None
+    line_speed_kmh: float | None = None
+
+    def matches(self, descriptor: str) -> bool:
+        return re.search(self.pattern, descriptor) is not None
+
+
+def trip_descriptor(trip: Trip, route: Route | None) -> str:
+    """Désignation d'une circulation, sur laquelle les catégories s'apparient.
+
+    Rassemble ce que le flux offre de discriminant : numéro de circulation, code
+    et intitulé de la ligne.
+    """
+    parts = [trip.headsign]
+    if route is not None:
+        parts += [route.short_name, route.long_name]
+    return " ".join(part for part in parts if part)
+
+
+@dataclass(frozen=True)
 class Site:
     """Un point d'observation et tout ce qu'il faut pour y prédire les passages."""
 
@@ -91,17 +128,35 @@ class Site:
     anchor_position: LatLon | None = None
     """Position de la gare d'appui ; déduite du GTFS si absente."""
     profile: TractionProfile = field(default_factory=TractionProfile)
+    categories: tuple[TrainCategory, ...] = ()
+    """Profils par type de matériel, essayés dans l'ordre déclaré."""
 
-    def profile_for(self, branch: Branch | None) -> TractionProfile:
-        """Profil de marche applicable à une branche.
+    def category_for(self, descriptor: str) -> TrainCategory | None:
+        """Première catégorie dont le motif reconnaît cette circulation."""
+        return next((c for c in self.categories if c.matches(descriptor)), None)
 
-        Une branche peut relever d'une vitesse de ligne propre : la marche en
-        sortie de gare diffère d'un axe à l'autre, même quand l'infrastructure
-        autorise partout la même vitesse.
+    def profile_for(
+        self, branch: Branch | None = None, category: TrainCategory | None = None
+    ) -> TractionProfile:
+        """Profil de marche applicable, du plus général au plus précis.
+
+        Trois couches se superposent : le profil du site, puis la vitesse propre
+        à la branche — la marche diffère d'un axe à l'autre — puis le matériel,
+        qui l'emporte. C'est bien cet ordre qu'il faut : une vitesse de branche
+        est calée sur les circulations qui desservent les haltes de l'axe, donc
+        sur des omnibus ; elle n'a pas à s'imposer à un train qui les traverse.
         """
-        if branch is None or branch.line_speed_kmh is None:
-            return self.profile
-        return replace(self.profile, line_speed_kmh=branch.line_speed_kmh)
+        profile = self.profile
+        if branch is not None and branch.line_speed_kmh is not None:
+            profile = replace(profile, line_speed_kmh=branch.line_speed_kmh)
+        if category is not None:
+            profile = replace(
+                profile,
+                accel_ms2=category.accel_ms2 or profile.accel_ms2,
+                decel_ms2=category.decel_ms2 or profile.decel_ms2,
+                line_speed_kmh=category.line_speed_kmh or profile.line_speed_kmh,
+            )
+        return profile
 
     def branch_for(self, bearing_deg: float) -> Branch | None:
         """Branche dont le secteur angulaire contient ce cap, la plus proche d'abord."""
@@ -128,6 +183,8 @@ class Passage:
     headsign: str = ""
     delay_s: int | None = None
     """Retard temps réel appliqué, en secondes. None si aucune donnée."""
+    category_id: str | None = None
+    """Catégorie de matériel retenue, si elle a pu être reconnue."""
 
     @property
     def is_realtime(self) -> bool:
@@ -146,9 +203,10 @@ class Passage:
         delay = ""
         if self.delay_s:
             delay = f" ({self.delay_s // 60:+d} min)"
+        category = f" [{self.category_id}]" if self.category_id else ""
         return (
             f"{stamp} ±{self.uncertainty_s:.0f}s [{flag}] {arrow} {self.branch.label} "
-            f"· {self.route_label} {self.headsign}{delay} · {self.speed_kmh:.0f} km/h"
+            f"· {self.route_label} {self.headsign}{category}{delay} · {self.speed_kmh:.0f} km/h"
         )
 
 
@@ -243,6 +301,7 @@ def predict_passages(
             continue
 
         route = feed.routes.get(trip.route_id)
+        category = site.category_for(trip_descriptor(trip, route))
         for anchor_stop_time, neighbour, direction in _neighbour_segments(trip, anchor_index):
             neighbour_stop = feed.stops.get(neighbour.stop_id)
             if neighbour_stop is None or neighbour_stop.position is None:
@@ -268,7 +327,7 @@ def predict_passages(
             if reference_s is None:
                 continue
 
-            profile = site.profile_for(branch)
+            profile = site.profile_for(branch, category)
             distance = _distance_to_observer_m(site, branch, anchor)
             travel = travel_time_s(distance, regime, profile)
             uncertainty = travel_time_uncertainty_s(distance, regime, profile)
@@ -297,6 +356,7 @@ def predict_passages(
                     route_label=route.label() if route else "",
                     headsign=trip.headsign,
                     delay_s=delay,
+                    category_id=category.category_id if category else None,
                 )
             )
 

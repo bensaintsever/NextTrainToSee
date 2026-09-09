@@ -218,3 +218,103 @@ def test_describe_is_human_readable(feed, site):
     passage = by_trip(predict_passages(feed, site, WEEKDAY))["T:SE:1"][0]
     text = passage.describe()
     assert "Narbonne" in text and "±" in text and "km/h" in text
+
+
+# -- types de matériel ---------------------------------------------------------
+
+
+def _category(**kwargs):
+    from nexttraintosee.predict import TrainCategory
+
+    defaults = {"category_id": "ter", "label": "TER", "pattern": r"\b8\d{5}\b"}
+    return TrainCategory(**{**defaults, **kwargs})
+
+
+def test_a_category_matches_on_the_train_designation():
+    from nexttraintosee.predict import Trip, trip_descriptor
+    from nexttraintosee.gtfs import Route
+
+    ter = _category()
+    trip = Trip(trip_id="t", route_id="r", service_id="s", headsign="870300")
+    route = Route(route_id="r", short_name="C5", long_name="Toulouse - Auch")
+
+    assert ter.matches(trip_descriptor(trip, route))
+    assert not ter.matches(trip_descriptor(Trip("t", "r", "s", headsign="4756"), route))
+
+
+def test_the_descriptor_survives_a_missing_route():
+    from nexttraintosee.predict import Trip, trip_descriptor
+
+    assert trip_descriptor(Trip("t", "r", "s", headsign="870300"), None) == "870300"
+
+
+def test_the_first_matching_category_wins(site):
+    from dataclasses import replace
+
+    first = _category(category_id="a", pattern=r"\d")
+    second = _category(category_id="b", pattern=r"\b8\d{5}\b")
+    configured = replace(site, categories=(first, second))
+
+    assert configured.category_for("870300").category_id == "a"
+    assert configured.category_for("aucun chiffre") is None
+
+
+def test_the_category_profile_overrides_the_branch(site):
+    from dataclasses import replace
+
+    branch = replace(site.branches[0], line_speed_kmh=66.0)
+    through = _category(category_id="gl", pattern=r"\d{4}", line_speed_kmh=120.0, accel_ms2=0.35)
+
+    assert site.profile_for(branch).line_speed_kmh == 66.0
+    profile = site.profile_for(branch, through)
+    assert profile.line_speed_kmh == 120.0
+    assert profile.accel_ms2 == 0.35
+
+
+def test_a_category_only_overrides_what_it_sets(site):
+    from dataclasses import replace
+
+    branch = replace(site.branches[0], line_speed_kmh=66.0)
+    partial = _category(category_id="x", pattern=r".", accel_ms2=0.9)
+    profile = site.profile_for(branch, partial)
+
+    assert profile.accel_ms2 == 0.9
+    assert profile.line_speed_kmh == 66.0  # laissée à la branche
+    assert profile.decel_ms2 == site.profile.decel_ms2
+
+
+def test_layers_apply_from_the_most_general_to_the_most_specific(site):
+    assert site.profile_for(None, None) == site.profile
+
+
+def test_predicted_passages_carry_their_category(feed, site):
+    from dataclasses import replace
+
+    configured = replace(site, categories=(_category(pattern=r"Narbonne"),))
+    passages = by_trip(predict_passages(feed, configured, WEEKDAY))
+
+    assert passages["T:SE:1"][0].category_id == "ter"
+    assert passages["T:S:1"][0].category_id is None
+
+
+def test_two_categories_on_one_branch_get_different_speeds(feed, site):
+    from dataclasses import replace
+
+    configured = replace(
+        site,
+        categories=(
+            _category(category_id="lent", pattern=r"Narbonne", line_speed_kmh=60.0),
+            _category(category_id="rapide", pattern=r"Latour", line_speed_kmh=160.0),
+        ),
+    )
+    passages = by_trip(predict_passages(feed, configured, WEEKDAY))
+
+    assert passages["T:SE:1"][0].speed_kmh < passages["T:S:1"][0].speed_kmh
+
+
+def test_the_category_shows_in_the_description(feed, site):
+    from dataclasses import replace
+
+    configured = replace(site, categories=(_category(pattern=r"Narbonne"),))
+    passage = by_trip(predict_passages(feed, configured, WEEKDAY))["T:SE:1"][0]
+    assert "[ter]" in passage.describe()
