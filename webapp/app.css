@@ -1,0 +1,418 @@
+/* NextTrainToSee — styles
+   Esthétique pixel-art assortie au fond `assets/toulouse.jpg` : police
+   « Press Start 2P », couleurs sombres, aucun aplat « flat design » qui
+   jurerait avec l'illustration. Les surcouches ne vivent que dans le ciel
+   (zone haute) et sur la voie (zone basse) : jamais sur le tiers central,
+   où se trouvent le train et le conducteur. */
+
+:root {
+  --sky: #2f5878;
+  --panel-bg: rgba(0, 0, 0, .35);
+  --panel-bg-strong: rgba(10, 14, 20, .78);
+  --text: #f5f7ee;
+  --accent: #ffd166;
+  --danger: #ff6b6b;
+  --ok: #8fe38f;
+  --shadow-hard: 0 2px 0 #000, 0 0 8px rgba(0, 0, 0, .85);
+  font-family: 'Press Start 2P', monospace;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #10202f;
+  color: var(--text);
+  font-family: 'Press Start 2P', monospace;
+  -webkit-font-smoothing: none;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Fond plein écran, centré, jamais déformé. Le rendu "pixelated" garde le
+   grain pixel-art net même agrandi sur un grand téléphone. */
+.bg {
+  position: fixed;
+  inset: 0;
+  background: #10202f url('assets/toulouse.jpg') center center / cover no-repeat;
+  image-rendering: pixelated;
+  z-index: 0;
+}
+
+/* Conteneur des surcouches : ne capte aucun clic sauf ses enfants interactifs,
+   pour laisser voir l'image partout ailleurs. */
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+
+/* Zone haute — le ciel dégagé + le haut du tunnel : calme sur l'illustration,
+   jamais jusqu'au nez du train. */
+.zone--sky {
+  top: 0;
+  padding-top: calc(env(safe-area-inset-top) + 10px);
+  gap: 8px;
+}
+
+/* Zone basse — la voie et le ballast : calme, aucun personnage. */
+.zone--track {
+  bottom: 0;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
+  gap: 10px;
+}
+
+.panel {
+  pointer-events: none;
+  background: var(--panel-bg);
+  border-radius: 10px;
+  padding: 10px 14px;
+  backdrop-filter: blur(1px);
+}
+
+.badge-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: .5rem;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .15);
+  border: 1px solid rgba(255, 255, 255, .4);
+  text-shadow: var(--shadow-hard);
+  letter-spacing: .5px;
+}
+
+.badge--rt { color: var(--ok); }
+.badge--rt.theoretical { color: var(--accent); border-color: rgba(255, 209, 102, .6); }
+.badge--delay { color: var(--danger); }
+.badge--delay.on-time { color: var(--ok); }
+
+.big-time {
+  font-size: clamp(2.1rem, 11vw, 3rem);
+  line-height: 1.15;
+  text-shadow: var(--shadow-hard);
+  margin-top: 4px;
+}
+
+.uncertainty {
+  font-size: .6rem;
+  opacity: .9;
+  text-shadow: var(--shadow-hard);
+}
+
+.countdown {
+  font-size: .55rem;
+  opacity: .95;
+  text-shadow: var(--shadow-hard);
+  min-height: 1.2em;
+}
+
+.direction {
+  font-size: .6rem;
+  text-shadow: var(--shadow-hard);
+  line-height: 1.6;
+}
+
+.train-info {
+  font-size: .5rem;
+  opacity: .85;
+  text-shadow: var(--shadow-hard);
+  line-height: 1.6;
+}
+
+/* État « imminent » : pulsation discrète entre announce_at - 30 s et
+   when + uncertainty_s. On ne fait varier que l'opacité du panneau, pas de
+   couleur criarde qui jurerait avec le pixel-art. */
+.sky-panel.imminent {
+  animation: pulse-discreet 1.3s ease-in-out infinite;
+  border: 1px solid rgba(255, 209, 102, .55);
+}
+
+@keyframes pulse-discreet {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .78; }
+}
+
+.next-panel {
+  min-width: 60vw;
+}
+
+.next-line {
+  font-size: .55rem;
+  text-shadow: var(--shadow-hard);
+}
+
+.actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.btn {
+  font-family: inherit;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, .55);
+  background: rgba(15, 20, 30, .6);
+  color: var(--text);
+  font-size: .6rem;
+  text-shadow: var(--shadow-hard);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.btn:active { transform: translateY(1px) scale(.98); }
+
+.btn-seen {
+  background: rgba(46, 92, 58, .72);
+  border-color: rgba(143, 227, 143, .7);
+  padding: 12px 22px;
+  font-size: .65rem;
+}
+
+.btn-histo {
+  font-size: 1.1rem;
+  padding: 10px 14px;
+}
+
+.btn-small { font-size: .55rem; padding: 9px 14px; }
+
+.btn-secondary {
+  background: rgba(60, 30, 30, .55);
+  border-color: rgba(255, 150, 150, .5);
+}
+
+/* Bandeau d'état dégradé : discret, en haut, au-dessus de tout. */
+.banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: calc(env(safe-area-inset-top) + 4px) 10px 4px;
+  text-align: center;
+  font-size: .5rem;
+  background: rgba(120, 20, 20, .75);
+  color: #fff;
+  text-shadow: var(--shadow-hard);
+}
+
+.banner.theoretical { background: rgba(120, 90, 10, .75); }
+
+/* Toast de confirmation d'observation */
+.toast {
+  position: fixed;
+  left: 8%;
+  right: 8%;
+  bottom: calc(env(safe-area-inset-bottom) + 112px);
+  z-index: 25;
+  background: var(--panel-bg-strong);
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: .55rem;
+  text-align: center;
+  text-shadow: var(--shadow-hard);
+  opacity: 0;
+  transition: opacity .25s ease;
+  pointer-events: none;
+}
+
+.toast.show { opacity: 1; }
+
+/* Carte de confirmation différée */
+.confirm-card {
+  position: fixed;
+  left: 6%;
+  right: 6%;
+  bottom: calc(env(safe-area-inset-bottom) + 112px);
+  z-index: 24;
+  background: var(--panel-bg-strong);
+  border: 1px solid rgba(255, 209, 102, .5);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+  transform: translateY(12px);
+  opacity: 0;
+  transition: transform .25s ease, opacity .25s ease;
+}
+
+.confirm-card.show { transform: translateY(0); opacity: 1; }
+
+.confirm-text {
+  font-size: .55rem;
+  margin: 0 0 12px;
+  text-shadow: var(--shadow-hard);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* Bottom sheets (précision manuelle, histogramme) */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0);
+  transition: background .25s ease;
+}
+
+.sheet-backdrop.show { background: rgba(0, 0, 0, .5); }
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  background: #16232f;
+  border-top: 2px solid rgba(255, 255, 255, .25);
+  border-radius: 16px 16px 0 0;
+  padding: 10px 20px calc(env(safe-area-inset-bottom) + 20px);
+  transform: translateY(105%);
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1);
+  max-height: 78vh;
+  overflow-y: auto;
+}
+
+.sheet.show { transform: translateY(0); }
+
+.sheet-handle {
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .35);
+  margin: 6px auto 14px;
+  touch-action: none;
+}
+
+.sheet-title {
+  font-size: .65rem;
+  margin: 0 0 16px;
+  text-align: center;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: .55rem;
+  margin-bottom: 16px;
+}
+
+.field input[type="time"] {
+  font-family: inherit;
+  font-size: .8rem;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .35);
+  background: #0e1822;
+  color: var(--text);
+  min-height: 44px;
+}
+
+#manual-sheet .btn, #manual-sheet button {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.tab {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .3);
+  background: rgba(255, 255, 255, .06);
+  font-size: .55rem;
+  padding: 8px;
+}
+
+.tab.active {
+  background: rgba(255, 209, 102, .25);
+  border-color: rgba(255, 209, 102, .6);
+}
+
+.histo-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: .5rem;
+  margin-bottom: 12px;
+}
+
+.histo-row {
+  display: grid;
+  grid-template-columns: 34px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.histo-hour { opacity: .8; }
+
+.histo-bar-track {
+  height: 14px;
+  background: rgba(255, 255, 255, .08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.histo-bar-fill {
+  /* Élément imbriqué dans .histo-bar-track (pas un enfant direct de la
+     grille) : display:block est indispensable, sinon la largeur en %
+     n'a aucun effet sur un span resté inline. */
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4f86b9, #ffd166);
+  border-radius: 4px 0 0 4px;
+  min-width: 2px;
+  transition: width .3s ease;
+}
+
+.histo-value { text-align: right; opacity: .9; }
+
+.histo-compare {
+  font-size: .55rem;
+  text-align: center;
+  color: var(--accent);
+  text-shadow: var(--shadow-hard);
+}
+
+/* Petits écrans en hauteur (SE, mini) : on resserre un peu. */
+@media (max-height: 700px) {
+  .big-time { font-size: clamp(1.7rem, 10vw, 2.4rem); }
+  .panel { padding: 8px 10px; }
+}

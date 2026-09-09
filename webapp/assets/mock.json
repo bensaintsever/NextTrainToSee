@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-09-09T22:41:07+02:00",
+  "site": "Toulouse — sud de Matabiau (Guilheméry / Port Saint-Sauveur)",
+  "realtime": true,
+  "passages": [
+    {
+      "trip_id": "MOCK-OUTBOUND-001",
+      "when": "2026-09-09T22:44:07+02:00",
+      "announce_at": "2026-09-09T22:43:34+02:00",
+      "uncertainty_s": 20.0,
+      "direction": "outbound",
+      "direction_label": "From Matabiau",
+      "look": "tunnel",
+      "branch_id": "se",
+      "branch_label": "Axe Narbonne / Sète (via Montaudran)",
+      "category_id": "ter",
+      "headsign": "876255",
+      "route_label": "Toulouse Matabiau - Narbonne",
+      "delay_s": 300,
+      "realtime": true,
+      "speed_kmh": 66.0
+    },
+    {
+      "trip_id": "MOCK-INBOUND-002",
+      "when": "2026-09-09T22:53:07+02:00",
+      "announce_at": "2026-09-09T22:52:29+02:00",
+      "uncertainty_s": 25.0,
+      "direction": "inbound",
+      "direction_label": "To Matabiau",
+      "look": "sud",
+      "branch_id": "sud",
+      "branch_label": "Axe Latour-de-Carol / Bayonne / Auch (via Saint-Agne)",
+      "category_id": "grandes_lignes",
+      "headsign": "Toulouse-Matabiau",
+      "route_label": "Latour-de-Carol - Toulouse Matabiau",
+      "delay_s": null,
+      "realtime": false,
+      "speed_kmh": 95.0
+    }
+  ]
+}

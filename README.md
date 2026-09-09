@@ -202,6 +202,25 @@ est calée sur les omnibus qui desservent les haltes de l'axe. Sans cette
 distinction, un Intercités traversant sans arrêt héritait des 66 km/h d'un
 omnibus qui, lui, freine pour s'arrêter à Montaudran.
 
+## L'application
+
+![L'application v0](docs/img/app-v0.jpeg)
+
+Une PWA servie par un serveur local — le pipeline validé reste en Python, le
+téléphone n'affiche que le résultat :
+
+```bash
+nexttraintosee serve            # puis http://<votre-mac>.local:8770 sur le téléphone
+```
+
+Prochain passage en grand sur la maquette pixel-art, direction « From / To
+Matabiau » avec le côté où regarder, compte à rebours piloté par l'heure
+d'annonce (jamais en retard), passage suivant en bas, bouton « 🚆 Il passe ! »
+qui journalise une observation à ±3 s, et bottom sheet avec l'histogramme
+semaine / week-end à échelle commune. Le serveur rafraîchit le temps réel
+toutes les 90 s et journalise ses relevés — la collecte pour `coverage`
+devient automatique. Conception détaillée : [`docs/app-v0.md`](docs/app-v0.md).
+
 ## Le capteur
 
 Le détecteur (`nexttraintosee.sensor`) travaille sur un **niveau scalaire**, pas
@@ -223,7 +242,7 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 310 tests, sans réseau), et la
+Le noyau est écrit et testé (`python -m pytest`, 377 tests, sans réseau), et la
 chaîne complète a tourné sur les données réelles : géométrie OpenStreetMap
 résolue, horaires SNCF chargés, retards temps réel appliqués, modèle de marche
 confronté aux horaires.

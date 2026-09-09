@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<title>NextTrainToSee</title>
+
+<!-- Couleur de la barre système : assortie au bleu du ciel de l'illustration -->
+<meta name="theme-color" content="#2f5878">
+
+<!-- PWA / iOS : installation sur l'écran d'accueil -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NextTrain">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="icon" href="assets/icon-512.png">
+
+<!-- Police pixel, avec repli monospace obligatoire (l'app doit rester lisible
+     hors-ligne, y compris sans accès à Google Fonts) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- Fond plein écran : le pixel-art de Toulouse. Reste toujours en dessous
+     de tout, jamais recouvert au tiers central (train + conducteur). -->
+<div class="bg" aria-hidden="true"></div>
+
+<!-- Bandeau discret d'état dégradé (API muette / horaire théorique) -->
+<div id="banner" class="banner" hidden></div>
+
+<main class="layer">
+
+  <!-- ZONE HAUTE — le ciel : prochain passage -->
+  <section class="zone zone--sky" id="zone-sky">
+    <div class="panel sky-panel" id="sky-panel">
+      <div class="badge-row">
+        <span class="badge badge--rt" id="badge-rt">—</span>
+        <span class="badge badge--delay" id="badge-delay" hidden></span>
+      </div>
+      <div class="big-time" id="big-time">—</div>
+      <div class="uncertainty" id="uncertainty">&nbsp;</div>
+      <div class="countdown" id="countdown">&nbsp;</div>
+      <div class="direction" id="direction">&nbsp;</div>
+      <div class="train-info" id="train-info">&nbsp;</div>
+    </div>
+  </section>
+
+  <!-- ZONE BASSE — la voie : passage suivant + actions -->
+  <section class="zone zone--track" id="zone-track">
+    <div class="panel next-panel">
+      <div class="next-line" id="next-line">…</div>
+    </div>
+    <div class="actions">
+      <button id="btn-seen" class="btn btn-seen" type="button">🚆 Il passe !</button>
+      <button id="btn-histo" class="btn btn-histo" type="button" aria-label="Statistiques de passage">📊</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- Confirmation visuelle d'une observation (appui sur « Il passe ! ») -->
+<div id="toast" class="toast" hidden></div>
+
+<!-- Carte différée : « le train de HH:MM est-il passé ? » -->
+<div id="confirm-card" class="confirm-card" hidden>
+  <p id="confirm-text" class="confirm-text"></p>
+  <div class="confirm-actions">
+    <button id="confirm-yes" class="btn btn-small">Oui</button>
+    <button id="confirm-no" class="btn btn-small btn-secondary">Non</button>
+  </div>
+</div>
+
+<!-- Bottom sheet : précision manuelle après un « Non » -->
+<div id="manual-backdrop" class="sheet-backdrop" hidden></div>
+<div id="manual-sheet" class="sheet" hidden>
+  <div class="sheet-handle" id="manual-handle"></div>
+  <h2 class="sheet-title">A-t-il vraiment circulé ?</h2>
+  <label class="field">
+    <span>Heure réelle du passage</span>
+    <input type="time" id="manual-time" step="30">
+  </label>
+  <button id="manual-submit" class="btn">Valider cette heure</button>
+  <button id="manual-not-passed" class="btn btn-secondary">Non, il n'est pas passé</button>
+</div>
+
+<!-- Bottom sheet : histogramme des passages -->
+<div id="histo-backdrop" class="sheet-backdrop" hidden></div>
+<div id="histo-sheet" class="sheet sheet--histo" hidden>
+  <div class="sheet-handle" id="histo-handle"></div>
+  <h2 class="sheet-title">Fréquence des passages</h2>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="weekday" type="button">Semaine</button>
+    <button class="tab" data-tab="weekend" type="button">Week-end</button>
+  </div>
+  <div class="histo-body" id="histo-body">Chargement…</div>
+  <p class="histo-compare" id="histo-compare" hidden></p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
