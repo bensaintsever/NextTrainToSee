@@ -684,3 +684,25 @@ def test_observations_feed_the_calibration(config_path, gtfs_zip, capsys):
     out = capsys.readouterr().out
     assert "3 rapports" in out
     assert "+25s" in out or "+24s" in out or "+26s" in out
+
+
+# -- nom d'hôte mDNS annoncé par `serve` -------------------------------------
+
+
+def test_mdns_hostname_adds_the_suffix_when_absent(monkeypatch):
+    from nexttraintosee.cli import _mdns_hostname
+    import socket
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "MacBookAir")
+    assert _mdns_hostname() == "MacBookAir.local"
+
+
+def test_mdns_hostname_does_not_double_the_suffix(monkeypatch):
+    # Sur macOS, gethostname() renvoie déjà un nom en « .local » : ajouter le
+    # suffixe sans condition produirait « machine.local.local », injoignable
+    # depuis un iPhone. C'est le bug réellement observé sur la machine de Benjamin.
+    from nexttraintosee.cli import _mdns_hostname
+    import socket
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "MacBook-Air-de-Benjamin.local")
+    assert _mdns_hostname() == "MacBook-Air-de-Benjamin.local"

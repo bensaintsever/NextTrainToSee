@@ -870,6 +870,17 @@ def _lan_ip() -> str | None:
         return None
 
 
+def _mdns_hostname() -> str:
+    """Nom d'hôte mDNS du poste, tel qu'un iPhone le résoudrait en « .local ».
+
+    Sur macOS, `socket.gethostname()` renvoie déjà un nom suffixé de
+    « .local » : ajouter le suffixe sans condition produirait
+    « machine.local.local », que personne ne peut joindre.
+    """
+    hostname = socket.gethostname()
+    return hostname if hostname.endswith(".local") else f"{hostname}.local"
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Sert la PWA et l'API HTTP décrites par le contrat du projet (§ 4)."""
     config = _load(args)
@@ -887,7 +898,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     webapp_dir = args.webapp_dir if args.webapp_dir is not None else DEFAULT_WEBAPP_DIR
     server = create_server(service, host=args.host, port=args.port, webapp_dir=webapp_dir)
     port = server.server_address[1]
-    hostname = socket.gethostname()
+    hostname = _mdns_hostname()
     lan_ip = _lan_ip()
 
     print(f"{config.site.name}")
@@ -896,9 +907,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         # Android ne résout pas les noms mDNS en « .local » de façon fiable :
         # l'adresse IP est la seule qui fonctionne à coup sûr sur un Pixel.
         print(f"Depuis le téléphone (même Wi-Fi) : http://{lan_ip}:{port}")
-        print(f"                     (ou, si iOS : http://{hostname}.local:{port})")
+        print(f"                     (ou, si iOS : http://{hostname}:{port})")
     else:
-        print(f"Depuis le téléphone (même Wi-Fi) : http://{hostname}.local:{port}")
+        print(f"Depuis le téléphone (même Wi-Fi) : http://{hostname}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
