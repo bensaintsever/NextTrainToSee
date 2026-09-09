@@ -72,10 +72,15 @@ button {
 
 /* Zone haute — le ciel dégagé + le haut du tunnel : calme sur l'illustration,
    jamais jusqu'au nez du train. Quatre niveaux, aérés (§ retour utilisateur
-   « trop serré ») : badges → heure+incertitude → compte à rebours → direction. */
+   « trop serré ») : badges → heure+incertitude → compte à rebours → direction.
+   Marge latérale plus généreuse que les autres zones (retour utilisateur :
+   « laisser de l'espace sur les côtés ») — c'est le bloc le plus large,
+   l'heure géante tend à occuper toute la largeur disponible. */
 .zone--sky {
   top: 0;
   padding-top: calc(env(safe-area-inset-top) + 14px);
+  padding-left: max(28px, env(safe-area-inset-left));
+  padding-right: max(28px, env(safe-area-inset-right));
 }
 
 /* Zone basse — la voie et le ballast : calme, aucun personnage. Accueille
@@ -371,11 +376,18 @@ button {
   right: max(14px, env(safe-area-inset-right));
   bottom: 0;
   z-index: 31;
-  background: #16232f;
-  border: 1px solid rgba(255, 255, 255, .25);
+  /* Même matériau de verre que les panneaux et le toast (--panel-bg-strong) :
+     la feuille se lit comme le reste de l'application, pas comme un panneau
+     à part. Un peu plus opaque que les petits panneaux du haut, pour rester
+     lisible même quand la portion d'image derrière elle est claire. */
+  background: var(--panel-bg-strong);
+  border: 1px solid var(--panel-border);
   border-bottom: none;
   border-radius: 20px 20px 0 0;
   padding: 10px 20px calc(env(safe-area-inset-bottom) + 20px);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: var(--panel-lift);
   transform: translateY(105%);
   transition: transform .28s cubic-bezier(.2, .8, .2, 1);
   max-height: 78vh;
