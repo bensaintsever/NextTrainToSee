@@ -213,13 +213,47 @@ téléphone n'affiche que le résultat :
 nexttraintosee serve            # puis http://<votre-mac>.local:8770 sur le téléphone
 ```
 
-Prochain passage en grand sur la maquette pixel-art, direction « From / To
+Prochain passage en grand sur la maquette pixel-art, direction « Depuis / Vers
 Matabiau » avec le côté où regarder, compte à rebours piloté par l'heure
-d'annonce (jamais en retard), passage suivant en bas, bouton « 🚆 Il passe ! »
+d'annonce (jamais en retard), passage suivant en bas, bouton « Il passe ! »
 qui journalise une observation à ±3 s, et bottom sheet avec l'histogramme
 semaine / week-end à échelle commune. Le serveur rafraîchit le temps réel
 toutes les 90 s et journalise ses relevés — la collecte pour `coverage`
 devient automatique. Conception détaillée : [`docs/app-v0.md`](docs/app-v0.md).
+
+### Le serveur en continu
+
+En usage réel, `serve` tourne en permanence plutôt que dans un terminal ouvert :
+un `LaunchAgent` macOS (`~/Library/LaunchAgents/com.nexttraintosee.serve.plist`)
+le démarre à l'ouverture de session et le relance seul en cas d'arrêt. Ses
+journaux vivent dans `logs/serve.log` et `logs/serve.err.log`.
+
+```bash
+launchctl print gui/$(id -u)/com.nexttraintosee.serve   # état
+tail -f logs/serve.log                                   # journal en direct
+launchctl kickstart -k gui/$(id -u)/com.nexttraintosee.serve  # redémarrer
+launchctl bootout gui/$(id -u)/com.nexttraintosee.serve  # arrêter définitivement
+```
+
+### Accès hors Wi-Fi domestique
+
+Le téléphone doit pouvoir joindre l'app même loin de la maison, en données
+mobiles. Sans IPv4 dédiée (le cas courant avec les box françaises — le FAI
+partage l'adresse entre plusieurs foyers), ouvrir un port sur la box ne
+suffit pas : la solution retenue est [Tailscale](https://tailscale.com), un
+réseau privé chiffré entre les appareils, gratuit en usage personnel, sans
+rien exposer publiquement.
+
+Une fois l'app installée et connectée sur le Mac et sur le téléphone (même
+compte), le nom stable à utiliser depuis le téléphone, Wi-Fi coupé ou non, est :
+
+```
+http://macbook-air-de-benjamin.tail04145f.ts.net:8770
+```
+
+Le serveur écoute déjà sur toutes les interfaces (`0.0.0.0`) : aucune
+configuration supplémentaire n'est nécessaire côté application, Tailscale
+ajoute simplement un chemin réseau vers la machine.
 
 ## Le capteur
 
