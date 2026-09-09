@@ -49,6 +49,12 @@ button {
   z-index: 0;
 }
 
+/* Bascule nuit (18 h – 6 h, heure locale de l'appareil) : la variante
+   nocturne de la même scène, cadrée à l'identique — voir app.js. */
+body.night .bg {
+  background-image: url('assets/toulouse-night.jpg');
+}
+
 /* Conteneur des surcouches : ne capte aucun clic sauf ses enfants interactifs,
    pour laisser voir l'image partout ailleurs. */
 .layer {

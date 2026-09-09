@@ -20,6 +20,14 @@ const IMMINENT_LEAD_MS = 30_000;      // état imminent dès announce_at - 30 s
 const CONFIRM_DELAY_MS = 90_000;      // carte après when + uncertainty + 90 s
 const CONFIRM_TTL_MS = 10 * 60_000;   // la carte s'efface après 10 min sans réponse
 
+// Fenêtre nocturne : 18 h – 6 h, heure locale de l'appareil (retour
+// utilisateur). Aucune API ne la fournit — c'est un repère visuel, pas une
+// donnée du contrat — donc simple à ajuster ici si besoin.
+const NIGHT_START_HOUR = 18;
+const NIGHT_END_HOUR = 6;
+const THEME_COLOR_DAY = '#2f5878';    // bleu du ciel diurne
+const THEME_COLOR_NIGHT = '#141a33';  // bleu nuit de la variante nocturne
+
 // Phrases fixes liées à `look`, tel que fourni par le serveur (§ 3 et § 5).
 // Raccourcies (retour utilisateur : « trop serré ») — sans « derrière toi ».
 const LOOK_PHRASES = {
@@ -347,10 +355,39 @@ function renderTrack() {
 }
 
 // ---------------------------------------------------------------------------
+// Bascule jour / nuit — même scène, variante nocturne de l'illustration
+// ---------------------------------------------------------------------------
+
+let isNight = null; // état inconnu au démarrage : force la première application
+
+function isNightNow() {
+  const hour = new Date().getHours();
+  // Fenêtre à cheval sur minuit (18 h → 6 h le lendemain) : une comparaison
+  // simple ne suffit pas, l'un des deux bornes doit s'inverser.
+  return NIGHT_START_HOUR > NIGHT_END_HOUR
+    ? hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR
+    : hour >= NIGHT_START_HOUR && hour < NIGHT_END_HOUR;
+}
+
+/** Applique (ou retire) le mode nuit si l'état a changé depuis le dernier
+ *  appel. Rappelée à chaque tick (§ ci-dessous) : peu coûteux quand rien ne
+ *  change, et l'app bascule toute seule si elle reste ouverte à travers
+ *  18 h ou 6 h sans qu'un rechargement soit nécessaire. */
+function applyDayNight() {
+  const night = isNightNow();
+  if (night === isNight) return;
+  isNight = night;
+  document.body.classList.toggle('night', night);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', night ? THEME_COLOR_NIGHT : THEME_COLOR_DAY);
+}
+
+// ---------------------------------------------------------------------------
 // Horloge locale à la seconde : ne rafraîchit que l'affichage, pas les données
 // ---------------------------------------------------------------------------
 
 function tick() {
+  applyDayNight();
   if (!isOffline) renderSky();
 }
 
@@ -745,6 +782,7 @@ wireDragToClose(histoSheetEl, histoBackdropEl, document.getElementById('histo-ha
 // Démarrage
 // ---------------------------------------------------------------------------
 
+applyDayNight(); // synchrone dès le chargement : pas d'éclair jour avant le premier tick
 fetchNext();
 setInterval(fetchNext, POLL_MS);
 setInterval(tick, TICK_MS);
