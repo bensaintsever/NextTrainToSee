@@ -453,3 +453,49 @@ def test_toml_stays_parseable_when_branches_are_flagged():
     )
     parsed = tomllib.loads(block)
     assert parsed["branches"][0]["passes_observer"] is True
+
+
+# -- confrontation du modèle aux horaires -------------------------------------
+
+
+def test_validate_compares_the_model_to_the_fastest_schedule(tracks_config, capsys):
+    assert run(tracks_config, "validate", "--min-trips", "1", "--day", "2026-09-09") == 0
+    out = capsys.readouterr().out
+
+    assert "horaire le plus rapide" in out
+    assert "marge horaire médiane" in out
+    assert "Saint-Agne" in out
+
+
+def test_validate_marks_segments_that_span_the_observer(tracks_config, capsys):
+    assert run(tracks_config, "validate", "--min-trips", "1", "--day", "2026-09-09") == 0
+    out = capsys.readouterr().out
+    assert "qui encadrent le point" in out
+
+
+def test_validate_can_suggest_a_line_speed_per_branch(tracks_config, capsys):
+    import tomllib
+
+    assert run(tracks_config, "validate", "--min-trips", "1", "--day", "2026-09-09", "--fit") == 0
+    out = capsys.readouterr().out
+
+    block = out[out.index("[[branches]]") : out.index("Lecture :")]
+    parsed = tomllib.loads(block)
+    assert parsed["branches"]
+    assert all("line_speed_kmh" in b for b in parsed["branches"])
+
+
+def test_validate_needs_enough_trips_to_be_meaningful(tracks_config, capsys):
+    # Le mini-GTFS n'a qu'une circulation par segment.
+    assert run(tracks_config, "validate", "--min-trips", "50", "--day", "2026-09-09") == 1
+    assert "Aucun segment exploitable" in capsys.readouterr().out
+
+
+def test_validate_reports_a_missing_gtfs(tmp_path, capsys):
+    path = tmp_path / "site.toml"
+    path.write_text(
+        CONFIG.format(gtfs=tmp_path / "absent.zip", database=tmp_path / "j.sqlite"),
+        encoding="utf-8",
+    )
+    assert run(path, "validate") == 2
+    assert "GTFS absente" in capsys.readouterr().err

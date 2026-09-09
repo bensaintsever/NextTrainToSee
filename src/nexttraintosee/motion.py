@@ -96,6 +96,119 @@ def speed_at_point_ms(distance_m: float, regime: Regime, profile: TractionProfil
     return min(reached, profile.line_speed_ms)
 
 
+@dataclass(frozen=True)
+class SegmentProfile:
+    """Découpage d'un parcours d'arrêt à arrêt en trois phases.
+
+    Un train qui relie deux gares accélère, roule au palier si la distance le
+    permet, puis freine. Quand elle ne le permet pas, le palier disparaît et le
+    profil devient triangulaire, avec une vitesse de crête inférieure à la
+    vitesse de ligne.
+    """
+
+    length_m: float
+    peak_speed_ms: float
+    accel_distance_m: float
+    cruise_distance_m: float
+    accel_time_s: float
+    cruise_time_s: float
+    decel_time_s: float
+
+    @property
+    def total_time_s(self) -> float:
+        return self.accel_time_s + self.cruise_time_s + self.decel_time_s
+
+    @property
+    def is_triangular(self) -> bool:
+        """Vrai quand le segment est trop court pour atteindre la vitesse de ligne."""
+        return self.cruise_distance_m <= 0.0
+
+
+def segment_profile(distance_m: float, profile: TractionProfile) -> SegmentProfile:
+    """Décompose un parcours d'arrêt à arrêt.
+
+    Raises:
+        ValueError: si la distance est négative.
+    """
+    if distance_m < 0:
+        raise ValueError("la distance doit être positive")
+
+    accel, decel = profile.accel_ms2, profile.decel_ms2
+    cruise = profile.line_speed_ms
+    accel_distance = cruise**2 / (2 * accel)
+    decel_distance = cruise**2 / (2 * decel)
+
+    if accel_distance + decel_distance <= distance_m:
+        cruise_distance = distance_m - accel_distance - decel_distance
+        return SegmentProfile(
+            length_m=distance_m,
+            peak_speed_ms=cruise,
+            accel_distance_m=accel_distance,
+            cruise_distance_m=cruise_distance,
+            accel_time_s=cruise / accel,
+            cruise_time_s=cruise_distance / cruise,
+            decel_time_s=cruise / decel,
+        )
+
+    # Trop court pour le palier : profil triangulaire. La vitesse de crête est
+    # celle où les distances d'accélération et de freinage épuisent le segment.
+    peak = math.sqrt(2 * distance_m * accel * decel / (accel + decel)) if distance_m > 0 else 0.0
+    return SegmentProfile(
+        length_m=distance_m,
+        peak_speed_ms=peak,
+        accel_distance_m=peak**2 / (2 * accel) if peak else 0.0,
+        cruise_distance_m=0.0,
+        accel_time_s=peak / accel if peak else 0.0,
+        cruise_time_s=0.0,
+        decel_time_s=peak / decel if peak else 0.0,
+    )
+
+
+def segment_time_s(distance_m: float, profile: TractionProfile) -> float:
+    """Durée d'un parcours d'arrêt à arrêt."""
+    return segment_profile(distance_m, profile).total_time_s
+
+
+def segment_progress_s(
+    covered_m: float, distance_m: float, profile: TractionProfile
+) -> float:
+    """Temps écoulé après avoir parcouru `covered_m` d'un segment de `distance_m`.
+
+    Raises:
+        ValueError: si `covered_m` sort du segment.
+    """
+    if not 0.0 <= covered_m <= distance_m:
+        raise ValueError(
+            f"{covered_m:.0f} m est hors du segment de {distance_m:.0f} m"
+        )
+    shape = segment_profile(distance_m, profile)
+    if shape.total_time_s == 0.0:
+        return 0.0
+
+    if covered_m <= shape.accel_distance_m:
+        return math.sqrt(2 * covered_m / profile.accel_ms2)
+    if covered_m <= shape.accel_distance_m + shape.cruise_distance_m:
+        return shape.accel_time_s + (covered_m - shape.accel_distance_m) / shape.peak_speed_ms
+    # Phase de freinage : on la parcourt à rebours depuis l'arrêt final.
+    remaining = distance_m - covered_m
+    return shape.total_time_s - math.sqrt(2 * remaining / profile.decel_ms2)
+
+
+def segment_fraction(covered_m: float, distance_m: float, profile: TractionProfile) -> float:
+    """Part du temps de parcours écoulée à `covered_m` du départ, dans [0, 1].
+
+    C'est la grandeur utile pour dater un passage en pleine voie quand on
+    connaît les horaires aux deux extrémités du segment : le modèle de marche ne
+    sert plus qu'à répartir une durée réelle, jamais à la prédire. Une erreur
+    sur l'accélération ne déplace donc plus le passage que de quelques secondes,
+    au lieu de décaler tout le calcul.
+    """
+    total = segment_time_s(distance_m, profile)
+    if total <= 0:
+        return 0.0
+    return segment_progress_s(covered_m, distance_m, profile) / total
+
+
 def travel_time_uncertainty_s(
     distance_m: float,
     regime: Regime,

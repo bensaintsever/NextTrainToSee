@@ -92,6 +92,17 @@ class Site:
     """Position de la gare d'appui ; déduite du GTFS si absente."""
     profile: TractionProfile = field(default_factory=TractionProfile)
 
+    def profile_for(self, branch: Branch | None) -> TractionProfile:
+        """Profil de marche applicable à une branche.
+
+        Une branche peut relever d'une vitesse de ligne propre : la marche en
+        sortie de gare diffère d'un axe à l'autre, même quand l'infrastructure
+        autorise partout la même vitesse.
+        """
+        if branch is None or branch.line_speed_kmh is None:
+            return self.profile
+        return replace(self.profile, line_speed_kmh=branch.line_speed_kmh)
+
     def branch_for(self, bearing_deg: float) -> Branch | None:
         """Branche dont le secteur angulaire contient ce cap, la plus proche d'abord."""
         candidates = [b for b in self.branches if b.matches(bearing_deg)]
@@ -160,12 +171,6 @@ def _distance_to_observer_m(site: Site, branch: Branch, anchor: LatLon) -> float
         return branch.track_distance_m
     # Repli sans géométrie OSM : distance à vol d'oiseau corrigée de la sinuosité.
     return haversine_m(anchor, site.position) * site.profile.sinuosity
-
-
-def _profile_for(site: Site, branch: Branch) -> TractionProfile:
-    if branch.line_speed_kmh is None:
-        return site.profile
-    return replace(site.profile, line_speed_kmh=branch.line_speed_kmh)
 
 
 def _neighbour_segments(
@@ -263,7 +268,7 @@ def predict_passages(
             if reference_s is None:
                 continue
 
-            profile = _profile_for(site, branch)
+            profile = site.profile_for(branch)
             distance = _distance_to_observer_m(site, branch, anchor)
             travel = travel_time_s(distance, regime, profile)
             uncertainty = travel_time_uncertainty_s(distance, regime, profile)

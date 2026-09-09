@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -226,3 +227,79 @@ def test_fitting_improves_on_the_starting_guess():
 def test_fitting_without_observations_is_refused():
     with pytest.raises(ValueError, match="aucun temps de parcours"):
         fit_profile([])
+
+
+# -- ajustement sur des temps d'arrêt à arrêt ---------------------------------
+
+
+def test_segment_fitting_recovers_the_profile_that_generated_the_data():
+    from nexttraintosee.matching import fit_segment_profile
+    from nexttraintosee.motion import segment_time_s
+
+    truth = TractionProfile(accel_ms2=0.6, decel_ms2=0.7, line_speed_kmh=95.0)
+    segments = [(length, segment_time_s(length, truth)) for length in (2000, 4000, 8000, 15000)]
+
+    fitted, rms = fit_segment_profile(segments)
+
+    assert rms < 5.0
+    assert fitted.line_speed_kmh == pytest.approx(truth.line_speed_kmh, rel=0.15)
+
+
+def test_segment_fitting_prefers_being_slow_to_being_impossible():
+    from nexttraintosee.matching import fit_segment_profile
+    from nexttraintosee.motion import segment_time_s
+
+    # Deux segments inconciliables : l'un veut un modèle rapide, l'autre lent.
+    # Être plus rapide que l'horaire le plus rapide est physiquement impossible,
+    # l'ajustement doit donc pencher du côté prudent.
+    segments = [(4000.0, 180.0), (4000.0, 400.0)]
+    fitted, _ = fit_segment_profile(segments)
+
+    modelled = segment_time_s(4000.0, fitted)
+    assert modelled > 290.0
+
+
+def test_segment_fitting_without_data_is_refused():
+    from nexttraintosee.matching import fit_segment_profile
+
+    with pytest.raises(ValueError, match="aucun segment"):
+        fit_segment_profile([])
+
+
+# -- ajustement de la seule vitesse de ligne ----------------------------------
+
+
+def test_line_speed_is_recovered_from_a_segment_time():
+    from nexttraintosee.matching import fit_line_speed_kmh
+    from nexttraintosee.motion import segment_time_s
+
+    profile = TractionProfile(accel_ms2=0.5, decel_ms2=0.6, line_speed_kmh=90.0)
+    target = segment_time_s(5000.0, replace(profile, line_speed_kmh=72.0))
+
+    assert fit_line_speed_kmh(5000.0, target, profile) == pytest.approx(72.0, rel=0.02)
+
+
+def test_a_slower_target_yields_a_lower_speed():
+    from nexttraintosee.matching import fit_line_speed_kmh
+
+    profile = TractionProfile()
+    assert fit_line_speed_kmh(5000.0, 400.0, profile) < fit_line_speed_kmh(5000.0, 200.0, profile)
+
+
+def test_an_unreachable_target_is_clamped_to_the_search_bounds():
+    from nexttraintosee.matching import fit_line_speed_kmh
+
+    profile = TractionProfile()
+    # Une seconde pour 5 km : inatteignable, on borne au maximum.
+    assert fit_line_speed_kmh(5000.0, 1.0, profile) == 200.0
+    # Dix heures pour 5 km : on borne au minimum.
+    assert fit_line_speed_kmh(5000.0, 36_000.0, profile) == 20.0
+
+
+def test_line_speed_fitting_rejects_impossible_inputs():
+    from nexttraintosee.matching import fit_line_speed_kmh
+
+    with pytest.raises(ValueError, match="strictement positives"):
+        fit_line_speed_kmh(0.0, 100.0, TractionProfile())
+    with pytest.raises(ValueError, match="strictement positives"):
+        fit_line_speed_kmh(1000.0, 0.0, TractionProfile())

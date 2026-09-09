@@ -40,6 +40,10 @@ bearing_deg = 137.5
 passes_observer = true
 # Corridor c2, à 383 m du point (un second, c3, à 488 m, porte le même axe).
 track_distance_m = 1565.0
+# Ajusté par `validate --fit` sur le parcours le plus rapide vers Montaudran
+# (4887 m en 5 min 00 s). Bien en deçà des 120 km/h de l'infrastructure : la
+# marche réelle vers Montaudran est nettement plus lente que la limite de voie.
+line_speed_kmh = 66.0
 
 [[branches]]
 id = "sud"
@@ -48,6 +52,8 @@ bearing_deg = 184.2
 passes_observer = true
 # Corridor c1, à 1 m du point : les voies passent au ras de la position.
 track_distance_m = 1564.0
+# Ajusté sur le parcours le plus rapide vers Saint-Agne (3836 m en 3 min 00 s).
+line_speed_kmh = 113.0
 
 [[branches]]
 id = "nord"
@@ -69,6 +75,7 @@ bearing_deg = 269.8
 # Le maintien à true est donc une décision, pas un oubli.
 passes_observer = true
 track_distance_m = 1564.0   # même tronc commun que la branche « sud »
+line_speed_kmh = 113.0      # idem
 
 [data]
 gtfs_path = "../data/sncf-gtfs.zip"

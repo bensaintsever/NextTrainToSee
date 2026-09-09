@@ -10,15 +10,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import AppConfig, ConfigError, load_config
-from .geo import bearing_distance_deg
+from .geo import bearing_distance_deg, initial_bearing_deg
 from .gtfs import GtfsError, GtfsFeed
-from .matching import calibrate, fit_profile, match_detections, runs_from_matches
+from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_detections, runs_from_matches
 from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops
 from .predict import Passage, next_passages, predict_passages, service_days_around
 from .realtime import RealtimeError, empty_snapshot, load_snapshot
 from .sensor.base import PassageDetector
 from .sensor.replay import read_levels
+from .sensor.session import Status, listen_session
 from .store import Store
+from .validate import check_segments, format_duration
 
 log = logging.getLogger("nexttraintosee")
 
@@ -300,12 +302,8 @@ def cmd_next(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_listen(args: argparse.Namespace) -> int:
-    """Écoute le capteur et journalise les passages réellement observés."""
-    config = _load(args)
-    from .sensor.audio import AudioUnavailable, listen
-
-    detector = PassageDetector(
+def _build_detector(config: AppConfig) -> PassageDetector:
+    return PassageDetector(
         trigger_db=config.sensor.trigger_db,
         release_db=config.sensor.release_db,
         min_duration_s=config.sensor.min_duration_s,
@@ -313,6 +311,12 @@ def cmd_listen(args: argparse.Namespace) -> int:
         refractory_s=config.sensor.refractory_s,
         baseline_half_life_s=config.sensor.baseline_half_life_s,
     )
+
+
+def cmd_listen(args: argparse.Namespace) -> int:
+    """Écoute le capteur et journalise les passages réellement observés."""
+    config = _load(args)
+    from .sensor.audio import AudioUnavailable, listen
 
     try:
         samples = listen(
@@ -324,45 +328,60 @@ def cmd_listen(args: argparse.Namespace) -> int:
         print(exc, file=sys.stderr)
         return 2
 
-    print(f"Écoute en cours sur « {config.site.name} ». Ctrl-C pour arrêter.\n")
+    horizon = f"{args.duration} min" if args.duration else "sans limite (Ctrl-C pour arrêter)"
+    print(f"Écoute en cours sur « {config.site.name} » — {horizon}.")
+    print("Seul le niveau sonore est calculé ; aucun son n'est enregistré.\n")
+
     with Store(config.data.database) as store:
+
+        def on_detection(detection) -> None:
+            store.record_detection(config.site.name, detection)
+            print(f"  passage observé : {detection.describe()}", flush=True)
+
+        def on_status(status: Status) -> None:
+            print(
+                f"  {status.at.strftime('%H:%M:%S')} · fond {status.baseline_db:6.1f} dB "
+                f"· pic {status.peak_db:6.1f} dB (+{status.headroom_db:.1f}) "
+                f"· {status.detections} détection(s)",
+                flush=True,
+            )
+
         try:
-            for detection in detector.feed(samples):
-                store.record_detection(config.site.name, detection)
-                print(f"  passage observé : {detection.describe()}")
+            stats = listen_session(
+                _build_detector(config),
+                samples,
+                duration_s=args.duration * 60 if args.duration else None,
+                on_detection=on_detection,
+                on_status=on_status,
+                status_every_s=args.status_every,
+            )
         except KeyboardInterrupt:
-            leftover = detector.flush()
-            if leftover is not None:
-                store.record_detection(config.site.name, leftover)
             detections, predictions = store.counts(config.site.name)
             print(f"\nArrêt. {detections} détections et {predictions} prédictions en base.")
+            return 0
+
+    print(f"\n{stats.describe()}")
+    if not stats.detections:
+        print(
+            "Aucun passage détecté. Si des trains sont pourtant passés, comparez le pic\n"
+            f"au fond dans les points d'étape : le seuil actuel est de "
+            f"{config.sensor.trigger_db:.0f} dB au-dessus du fond."
+        )
     return 0
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
     """Rejoue un enregistrement de niveaux à travers le détecteur."""
     config = _load(args)
-    detector = PassageDetector(
-        trigger_db=config.sensor.trigger_db,
-        release_db=config.sensor.release_db,
-        min_duration_s=config.sensor.min_duration_s,
-        max_duration_s=config.sensor.max_duration_s,
-        refractory_s=config.sensor.refractory_s,
-        baseline_half_life_s=config.sensor.baseline_half_life_s,
-    )
+    stats = listen_session(_build_detector(config), read_levels(args.levels))
 
-    detections = list(detector.feed(read_levels(args.levels)))
-    leftover = detector.flush()
-    if leftover is not None:
-        detections.append(leftover)
-
-    print(f"{len(detections)} passage(s) détecté(s) dans {args.levels} :")
-    for detection in detections:
+    print(f"{len(stats.detections)} passage(s) détecté(s) dans {args.levels} :")
+    for detection in stats.detections:
         print(f"  {detection.describe()}")
 
-    if args.record and detections:
+    if args.record and stats.detections:
         with Store(config.data.database) as store:
-            for detection in detections:
+            for detection in stats.detections:
                 store.record_detection(config.site.name, detection)
         print(f"\nEnregistrées dans {config.data.database}")
     return 0
@@ -423,6 +442,120 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
             "dans aucun flux ouvert, seul le capteur les voit."
         )
     return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Confronte le modèle de marche aux horaires, sans capteur ni présence."""
+    config = _load(args)
+    if config.site.anchor_position is None:
+        print("Renseignez anchor_lat / anchor_lon pour vérifier le modèle.", file=sys.stderr)
+        return 2
+    try:
+        feed = _open_feed(config)
+    except GtfsError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    client = OverpassClient(cache_dir=config.data.overpass_cache)
+    try:
+        ways, _ = client.around(
+            config.site.position,
+            radius_m=config.search_radius_m,
+            anchor=config.site.anchor_position,
+            lookahead_m=config.branch_lookahead_m,
+        )
+    except OverpassError as exc:
+        print(f"Overpass : {exc}\nLancez d'abord `tracks` pour constituer le cache.", file=sys.stderr)
+        return 2
+
+    corridors = build_corridors(
+        ways, config.site.position, max_distance_m=config.search_radius_m
+    )
+    day = args.day or datetime.now().date()
+    checks = check_segments(feed, corridors, config.site, day, min_trips=args.min_trips)
+    if not checks:
+        print("Aucun segment exploitable : trop peu de circulations, ou géométrie absente.")
+        return 1
+
+    print(f"Modèle de marche confronté aux horaires du {day.strftime('%d/%m/%Y')}\n")
+    print(
+        f"Accélération {config.site.profile.accel_ms2:.2f} m/s², "
+        f"freinage {config.site.profile.decel_ms2:.2f} m/s² ; "
+        "vitesse de ligne propre à chaque branche.\n"
+    )
+
+    spanning = [c for c in checks if c.covers_observer]
+    for check in checks:
+        marker = "▸" if check.covers_observer else " "
+        print(f"{marker} {config.site.anchor_station} ↔ {check.neighbour}")
+        branch = f" · branche {check.branch_id}" if check.branch_id else ""
+        speed = f" · modèle à {check.line_speed_kmh:.0f} km/h" if check.line_speed_kmh else ""
+        print(
+            f"      {check.length_m:.0f} m par la voie · {check.trip_count} circulations"
+            f"{branch}{speed}"
+            f"{'' if check.covers_observer else ' · ne passe pas devant le point'}"
+        )
+        print(
+            f"      horaire le plus rapide  {format_duration(check.fastest_s):>12s}"
+            f"   ({check.implied_speed_kmh:.0f} km/h de moyenne)"
+        )
+        print(
+            f"      modèle                  {format_duration(check.modelled_s):>12s}"
+            f"   écart {check.gap_s:+.0f} s — {check.verdict}"
+        )
+        print(f"      marge horaire médiane   {format_duration(check.median_padding_s):>12s}")
+        print()
+
+    if spanning:
+        consistent = sum(1 for c in spanning if c.is_consistent)
+        print(
+            f"{consistent} segment(s) cohérent(s) sur {len(spanning)} qui encadrent le point.\n"
+        )
+    if args.fit:
+        _print_speed_fit(config, feed, checks)
+
+    print(
+        "Lecture : l'horaire le plus rapide approche la limite physique, la médiane\n"
+        "porte la marge de régularité. Un modèle plus rapide que tout horaire est\n"
+        "trop optimiste ; nettement plus lent, il retardera les passages prédits.\n"
+        "Cette vérification ne remplace pas un capteur : elle valide la marche, pas\n"
+        "l'heure de passage, et ne voit aucune circulation absente des horaires."
+    )
+    return 0
+
+
+def _print_speed_fit(config: AppConfig, feed, checks) -> None:
+    """Propose une vitesse de ligne par branche, ajustée sur l'horaire le plus rapide."""
+    anchor = config.site.anchor_position
+    assert anchor is not None
+
+    suggestions: dict[str, tuple[float, object]] = {}
+    for check in checks:
+        if not check.covers_observer:
+            continue
+        stops = [s for s in feed.find_stops_by_name(check.neighbour) if s.position]
+        if not stops:
+            continue
+        branch = config.site.branch_for(initial_bearing_deg(anchor, stops[0].position))
+        if branch is None:
+            continue
+        speed = fit_line_speed_kmh(check.length_m, check.fastest_s, config.site.profile)
+        # Le segment le plus long contraint le mieux la vitesse de palier.
+        if branch.branch_id not in suggestions or check.length_m > suggestions[branch.branch_id][1].length_m:
+            suggestions[branch.branch_id] = (speed, check)
+
+    if not suggestions:
+        return
+
+    print("Vitesse de ligne ajustée sur l'horaire le plus rapide, branche par branche :\n")
+    for branch_id, (speed, check) in sorted(suggestions.items()):
+        print("[[branches]]")
+        print(f'id = "{branch_id}"')
+        print(
+            f"line_speed_kmh = {speed:.0f}"
+            f"   # {check.length_m:.0f} m en {format_duration(check.fastest_s)} vers {check.neighbour}"
+        )
+        print()
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -500,6 +633,12 @@ def build_parser() -> argparse.ArgumentParser:
     upcoming.set_defaults(func=cmd_next)
 
     listening = subparsers.add_parser("listen", help="écouter le capteur audio")
+    listening.add_argument(
+        "--duration", type=float, default=None, help="durée de la session, en minutes"
+    )
+    listening.add_argument(
+        "--status-every", type=float, default=60.0, help="intervalle des points d'étape, en secondes"
+    )
     listening.set_defaults(func=cmd_listen)
 
     replaying = subparsers.add_parser("replay", help="rejouer un enregistrement de niveaux")
@@ -522,6 +661,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="fin de la fenêtre d'analyse (ISO 8601) ; par défaut maintenant",
     )
     calibrating.set_defaults(func=cmd_calibrate)
+
+    validating = subparsers.add_parser(
+        "validate", help="confronter le modèle de marche aux horaires"
+    )
+    validating.add_argument(
+        "--day", type=lambda v: datetime.strptime(v, "%Y-%m-%d").date(), default=None,
+        help="journée de service à examiner (AAAA-MM-JJ)",
+    )
+    validating.add_argument(
+        "--min-trips", type=int, default=5, help="circulations minimales par segment"
+    )
+    validating.add_argument(
+        "--fit", action="store_true", help="proposer une vitesse de ligne par branche"
+    )
+    validating.set_defaults(func=cmd_validate)
 
     doctor = subparsers.add_parser("doctor", help="vérifier l'environnement")
     doctor.set_defaults(func=cmd_doctor)

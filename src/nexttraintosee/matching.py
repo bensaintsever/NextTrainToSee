@@ -14,9 +14,9 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, replace
 from datetime import timedelta
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
-from .motion import Regime, TractionProfile, travel_time_s
+from .motion import Regime, TractionProfile, segment_time_s, travel_time_s
 from .predict import Passage
 from .sensor.base import Detection
 
@@ -196,29 +196,21 @@ def _rms_error(runs: Sequence[ObservedRun], profile: TractionProfile) -> float:
     return (total / len(runs)) ** 0.5
 
 
-def fit_profile(
-    runs: Sequence[ObservedRun],
-    start: TractionProfile | None = None,
+def _grid_search(
+    cost: Callable[[TractionProfile], float],
+    start: TractionProfile,
     rounds: int = 3,
-) -> tuple[TractionProfile, float]:
-    """Ajuste accélération, freinage et vitesse de ligne sur des temps mesurés.
+    steps: int = 9,
+) -> TractionProfile:
+    """Minimise `cost` sur les trois paramètres de marche, par grilles resserrées.
 
-    Recherche par grille resserrée successivement autour du meilleur point : le
-    problème a trois paramètres bornés et une poignée d'observations, une
-    descente de gradient serait démesurée.
-
-    Returns:
-        Le profil ajusté et l'erreur quadratique moyenne résiduelle, en secondes.
-
-    Raises:
-        ValueError: si aucun temps de parcours n'est fourni.
+    Le problème a trois paramètres bornés et une poignée d'observations : une
+    grille que l'on resserre autour du meilleur point converge en quelques
+    passes, là où une descente de gradient serait démesurée.
     """
-    if not runs:
-        raise ValueError("ajustement impossible : aucun temps de parcours observé")
-
-    best = start or TractionProfile()
     bounds = {"accel_ms2": (0.15, 1.30), "decel_ms2": (0.15, 1.30), "line_speed_kmh": (30.0, 200.0)}
-    steps = 9
+    best = start
+    best_cost = cost(best)
 
     for round_index in range(rounds):
         shrink = 0.5**round_index
@@ -229,15 +221,126 @@ def fit_profile(
             lo, hi = max(low, centre - span), min(high, centre + span)
             grids[name] = [lo + (hi - lo) * i / (steps - 1) for i in range(steps)]
 
-        best_error = _rms_error(runs, best)
         for accel in grids["accel_ms2"]:
             for decel in grids["decel_ms2"]:
                 for speed in grids["line_speed_kmh"]:
                     candidate = replace(
                         best, accel_ms2=accel, decel_ms2=decel, line_speed_kmh=speed
                     )
-                    error = _rms_error(runs, candidate)
-                    if error < best_error:
-                        best, best_error = candidate, error
+                    candidate_cost = cost(candidate)
+                    if candidate_cost < best_cost:
+                        best, best_cost = candidate, candidate_cost
 
-    return best, _rms_error(runs, best)
+    return best
+
+
+def fit_profile(
+    runs: Sequence[ObservedRun],
+    start: TractionProfile | None = None,
+    rounds: int = 3,
+) -> tuple[TractionProfile, float]:
+    """Ajuste accélération, freinage et vitesse de ligne sur des temps mesurés.
+
+    Returns:
+        Le profil ajusté et l'erreur quadratique moyenne résiduelle, en secondes.
+
+    Raises:
+        ValueError: si aucun temps de parcours n'est fourni.
+    """
+    if not runs:
+        raise ValueError("ajustement impossible : aucun temps de parcours observé")
+
+    def cost(profile: TractionProfile) -> float:
+        return _rms_error(runs, profile)
+
+    best = _grid_search(cost, start or TractionProfile(), rounds=rounds)
+    return best, cost(best)
+
+
+def fit_segment_profile(
+    segments: Sequence[tuple[float, float]],
+    start: TractionProfile | None = None,
+    rounds: int = 3,
+    overshoot_penalty: float = 3.0,
+) -> tuple[TractionProfile, float]:
+    """Ajuste le profil sur des temps de parcours d'arrêt à arrêt.
+
+    Args:
+        segments: couples (longueur en mètres, durée de référence en secondes).
+            La durée attendue est **la plus rapide observée** sur le segment,
+            celle qui approche la limite physique — pas une médiane, qui porte
+            la marge de régularité.
+        start: profil de départ.
+        rounds: nombre de resserrements de grille.
+        overshoot_penalty: poids appliqué aux écarts où le modèle est *plus
+            rapide* que l'horaire le plus rapide. Un tel écart est physiquement
+            impossible, alors qu'être un peu plus lent est seulement prudent :
+            on pénalise donc les deux différemment.
+
+    Returns:
+        Le profil ajusté et l'erreur quadratique moyenne résiduelle, en secondes.
+
+    Raises:
+        ValueError: si aucun segment n'est fourni.
+    """
+    if not segments:
+        raise ValueError("ajustement impossible : aucun segment fourni")
+
+    def cost(profile: TractionProfile) -> float:
+        total = 0.0
+        for length_m, reference_s in segments:
+            error = segment_time_s(length_m, profile) - reference_s
+            weight = overshoot_penalty if error < 0 else 1.0
+            total += weight * error * error
+        return (total / len(segments)) ** 0.5
+
+    best = _grid_search(cost, start or TractionProfile(), rounds=rounds)
+    residual = (
+        sum((segment_time_s(l, best) - t) ** 2 for l, t in segments) / len(segments)
+    ) ** 0.5
+    return best, residual
+
+
+def fit_line_speed_kmh(
+    length_m: float,
+    target_s: float,
+    profile: TractionProfile,
+    low_kmh: float = 20.0,
+    high_kmh: float = 200.0,
+    tolerance_s: float = 0.5,
+) -> float:
+    """Vitesse de ligne reproduisant une durée de parcours donnée.
+
+    Accélération et freinage sont conservés : sur un unique segment, ajuster
+    trois paramètres à la fois n'a aucun sens, alors que la vitesse de ligne est
+    à la fois la plus incertaine et la plus déterminante. La durée décroît
+    strictement avec la vitesse, ce qui autorise une simple dichotomie.
+
+    Returns:
+        La vitesse ajustée, bornée à l'intervalle de recherche quand la durée
+        visée est hors d'atteinte.
+
+    Raises:
+        ValueError: si la longueur ou la durée visée n'est pas positive.
+    """
+    if length_m <= 0 or target_s <= 0:
+        raise ValueError("longueur et durée visée doivent être strictement positives")
+
+    def duration(speed_kmh: float) -> float:
+        return segment_time_s(length_m, replace(profile, line_speed_kmh=speed_kmh))
+
+    if duration(high_kmh) > target_s:
+        return high_kmh
+    if duration(low_kmh) < target_s:
+        return low_kmh
+
+    for _ in range(60):
+        middle = (low_kmh + high_kmh) / 2
+        elapsed = duration(middle)
+        if abs(elapsed - target_s) <= tolerance_s:
+            return middle
+        if elapsed > target_s:
+            low_kmh = middle
+        else:
+            high_kmh = middle
+    return (low_kmh + high_kmh) / 2

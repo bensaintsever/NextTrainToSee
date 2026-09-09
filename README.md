@@ -117,16 +117,42 @@ nexttraintosee next
 nexttraintosee next --horizon 30 --no-realtime
 nexttraintosee next --at 2026-09-09T18:00 --record
 
-# 3. Écouter le capteur et journaliser les passages réellement observés
-nexttraintosee listen
+# 3. Vérifier le modèle de marche — sans capteur ni présence sur place
+nexttraintosee validate
+nexttraintosee validate --fit          # propose une vitesse de ligne par branche
 
-# 4. Recaler le modèle et lister ce qui n'est dans aucun horaire
+# 4. Écouter le capteur et journaliser les passages réellement observés
+nexttraintosee listen --duration 60
+
+# 5. Recaler le modèle et lister ce qui n'est dans aucun horaire
 nexttraintosee calibrate --days 7
 ```
 
 La configuration du site vit dans
 [`config/toulouse-guilhemery.toml`](config/toulouse-guilhemery.toml) : point,
 gare d'appui, branches, profil de marche, réglages du capteur.
+
+## Vérifier le modèle sans se déplacer
+
+Le point d'observation est situé **entre deux gares**. Les horaires publient donc
+déjà, pour chaque circulation, le temps mis à parcourir un segment qui contient
+le point : une vérité terrain gratuite.
+
+`nexttraintosee validate` s'en sert, avec deux précautions qui font toute la
+différence :
+
+* **On compare à l'horaire le plus rapide, jamais à la médiane.** Sur ce site,
+  la marge de régularité médiane atteint deux minutes ; seules les circulations
+  les plus tendues approchent la limite physique.
+* **On ne s'en sert pas pour interpoler.** Les horaires sont arrondis à la
+  minute et inégalement margés : répartir une durée horaire le long du segment
+  placerait les passages jusqu'à une minute trop tard. Le modèle reste ancré sur
+  l'heure en gare ; l'horaire ne sert qu'à le contrôler.
+
+Sur le site de Toulouse, la vérification a montré qu'une vitesse de ligne unique
+ne convenait pas : l'axe de Saint-Agne tient 113 km/h, celui de Montaudran
+plafonne à 66 km/h, très en deçà des 120 km/h de l'infrastructure. `--fit`
+propose ces valeurs, branche par branche.
 
 ## Le capteur
 
@@ -149,13 +175,17 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 195 tests, sans réseau), et la
+Le noyau est écrit et testé (`python -m pytest`, 244 tests, sans réseau), et la
 chaîne complète a tourné sur les données réelles : géométrie OpenStreetMap
-résolue, horaires SNCF chargés, retards temps réel appliqués.
+résolue, horaires SNCF chargés, retards temps réel appliqués, modèle de marche
+confronté aux horaires.
 
-La configuration de Toulouse porte des **valeurs mesurées**, plus des
-estimations : 1 564 m par la voie jusqu'à Matabiau pour l'axe de Saint-Agne
-(dont les voies passent à 1 m du point), 1 565 m pour l'axe de Narbonne.
+La configuration de Toulouse ne porte plus aucune estimation : 1 564 m par la
+voie jusqu'à Matabiau pour l'axe de Saint-Agne (dont les voies passent à 1 m du
+point) à 113 km/h, 1 565 m pour l'axe de Narbonne à 66 km/h.
+
+Reste la moitié capteur, qui demande un micro **au point d'observation** — c'est
+elle qui fera tomber les ±13 s à quelques secondes et révélera le fret.
 
 ### Un piège macOS : iCloud et les environnements virtuels
 

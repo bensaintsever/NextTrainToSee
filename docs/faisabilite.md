@@ -196,7 +196,7 @@ du temps en aval sans que cela change son heure de passage ici.
 
 | Source d'erreur | Ordre de grandeur | Réductible ? |
 | --- | ---: | --- |
-| Modèle de marche (accélération, vitesse réelle) | ±13 s *(mesuré)* | **oui** — par recalage capteur |
+| Modèle de marche (accélération, vitesse réelle) | ±13 à ±20 s *(mesuré)* | **oui** — par recalage capteur |
 | Distance gare → point | ±0 s — **mesurée** à 1 564 m | fait |
 | Fraîcheur du temps réel (flux à 2 min) | ±5 à 30 s | non |
 | Arrondi des horaires GTFS à la minute | ±30 s | partiellement, via le temps réel |
@@ -213,6 +213,39 @@ la différence, parce qu'il attaque les deux plus gros postes du tableau — et
 qu'il les mesure au lieu de les supposer.
 
 ---
+
+## 4 bis. Ce que les horaires disent du modèle
+
+Le point est entre deux gares : les horaires donnent donc déjà le temps de
+parcours d'un segment qui le contient. `nexttraintosee validate` s'en sert comme
+vérité terrain, et le résultat a corrigé une hypothèse fausse.
+
+| Segment | Longueur | Circulations | Le plus rapide | Marge médiane |
+| --- | ---: | ---: | ---: | ---: |
+| Matabiau ↔ Saint-Agne | 3 836 m | 133 | 3 min 00 s (77 km/h) | +2 min 00 s |
+| Matabiau ↔ Montaudran | 4 887 m | 40 | 5 min 00 s (59 km/h) | +0 min 00 s |
+
+Trois enseignements :
+
+1. **La marche diffère d'un axe à l'autre.** 120 km/h est la limite
+   d'infrastructure relevée sur OSM ; la marche réelle tient 113 km/h vers
+   Saint-Agne mais seulement 66 km/h vers Montaudran. Une vitesse unique rendait
+   le modèle plus rapide que tout horaire — physiquement impossible. La vitesse
+   est désormais réglée par branche.
+2. **Il faut comparer au plus rapide, pas à la médiane.** Deux minutes de marge
+   de régularité séparent les deux sur l'axe de Saint-Agne. La médiane décrit la
+   robustesse d'un horaire, pas la capacité d'un train.
+3. **Les horaires ne peuvent pas servir à interpoler.** C'était l'idée
+   séduisante : puisque l'on connaît l'heure aux deux bouts du segment, répartir
+   la durée réelle plutôt que la prédire. Elle ne tient pas — les horaires sont
+   arrondis à la minute, et la marge n'est pas répartie uniformément le long du
+   parcours. Un passage prédit ainsi arriverait jusqu'à une minute trop tard. Le
+   modèle reste donc ancré sur l'heure en gare d'appui, et l'horaire ne sert
+   qu'au contrôle.
+
+Cette vérification ne demande ni capteur ni présence sur place, mais elle a ses
+limites : elle valide la **marche**, pas l'heure de passage, et ne voit aucune
+circulation absente des horaires.
 
 ## 5. Ce que ce système ne saura jamais faire seul
 
