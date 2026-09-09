@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import sys
 from datetime import datetime, timedelta
@@ -26,6 +27,23 @@ GTFS_DOWNLOAD_URL = "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenDa
 
 def _load(args: argparse.Namespace) -> AppConfig:
     return load_config(args.config)
+
+
+def dependency_status(module: str, extra: str) -> str:
+    """État d'une dépendance optionnelle, en une ligne lisible.
+
+    Un paquet peut être installé et pourtant inutilisable : `sounddevice` lève
+    une `OSError` — et non une `ImportError` — quand la bibliothèque système
+    PortAudio est absente. Les deux cas appellent des remèdes différents, on les
+    distingue donc au lieu de tout traiter comme « absent ».
+    """
+    try:
+        importlib.import_module(module)
+    except ImportError:
+        return f'absent → pip install "nexttraintosee[{extra}]"'
+    except Exception as exc:
+        return f"installé mais inutilisable ({exc})"
+    return "disponible"
 
 
 def _moment(value: str) -> datetime:
@@ -304,12 +322,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         ("sounddevice", "sensor", "capture audio"),
         ("numpy", "sensor", "traitement du signal"),
     ):
-        try:
-            __import__(module)
-            status = "disponible"
-        except ImportError:
-            status = f'absent → pip install "nexttraintosee[{extra}]"'
-        print(f"  {purpose:20s} {status}")
+        print(f"  {purpose:20s} {dependency_status(module, extra)}")
 
     database = config.data.database
     if database.exists():

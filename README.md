@@ -71,18 +71,37 @@ Le détail du raisonnement, le budget d'erreur et les cas limites sont dans
 
 ## Installation
 
+En une commande — environnement virtuel, dépendances, horaires SNCF, puis
+résolution de la géométrie des voies :
+
 ```bash
-pip install -e ".[realtime,sensor]"     # temps réel + capteur audio
-pip install -e .                        # noyau seul, sans dépendance externe
+git clone https://github.com/bensaintsever/NextTrainToSee.git
+cd NextTrainToSee
+./scripts/bootstrap.sh
 ```
 
-Puis récupérez les horaires théoriques (environ 100 Mo) :
+Le script est tolérant aux pannes : si le téléchargement des horaires ou
+l'appel à Overpass échoue, il le signale et poursuit — chaque étape est
+reprenable indépendamment.
+
+<details>
+<summary>Ou à la main</summary>
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[realtime,sensor]"     # temps réel + capteur audio
+pip install -e .                        # noyau seul, sans dépendance externe
+
 mkdir -p data
 curl -L -o data/sncf-gtfs.zip \
   https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip
 ```
+
+Le capteur audio a besoin de PortAudio (`brew install portaudio` sur macOS,
+`sudo apt install libportaudio2` sur Debian/Ubuntu). Sans lui, tout le reste
+fonctionne : `nexttraintosee doctor` vous le dira.
+
+</details>
 
 ## Utilisation
 
@@ -130,7 +149,7 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 173 tests, sans réseau).
+Le noyau est écrit et testé (`python -m pytest`, 177 tests, sans réseau).
 
 ⚠️ **Une étape reste à faire chez vous** : la géométrie exacte des voies au
 droit du point n'a pas pu être vérifiée — l'environnement dans lequel ce code a

@@ -53,6 +53,13 @@ def listen(
             "capture audio indisponible : installez les extras capteur "
             '(pip install "nexttraintosee[sensor]")'
         ) from exc
+    except OSError as exc:  # pragma: no cover - dépend du système
+        # sounddevice est installé mais sa bibliothèque native manque.
+        raise AudioUnavailable(
+            "sounddevice est installé mais PortAudio est introuvable. "
+            "Debian/Ubuntu : sudo apt install libportaudio2 — "
+            f"macOS : brew install portaudio. Détail : {exc}"
+        ) from exc
 
     block_size = max(1, int(sample_rate_hz * block_seconds))
     try:

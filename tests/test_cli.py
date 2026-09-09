@@ -202,3 +202,49 @@ def test_calibrate_reports_unexplained_detections(config_path, tmp_path, capsys)
     out = capsys.readouterr().out
     assert "hors horaires publics" in out
     assert "fret" in out
+
+
+# -- diagnostic des dépendances optionnelles ---------------------------------
+
+
+def test_dependency_status_reports_an_available_module():
+    from nexttraintosee.cli import dependency_status
+
+    assert dependency_status("json", "realtime") == "disponible"
+
+
+def test_dependency_status_points_at_the_right_extra():
+    from nexttraintosee.cli import dependency_status
+
+    status = dependency_status("module.qui.nexiste.pas", "sensor")
+    assert 'pip install "nexttraintosee[sensor]"' in status
+
+
+def test_dependency_status_distinguishes_installed_but_broken(monkeypatch):
+    # sounddevice s'installe sans PortAudio et lève alors une OSError, pas une
+    # ImportError : le diagnostic doit dire « installé mais inutilisable »,
+    # pas « absent », faute de quoi le remède proposé est le mauvais.
+    import importlib
+
+    from nexttraintosee import cli
+
+    def explode(name):
+        raise OSError("PortAudio library not found")
+
+    monkeypatch.setattr(importlib, "import_module", explode)
+    status = cli.dependency_status("sounddevice", "sensor")
+
+    assert "installé mais inutilisable" in status
+    assert "PortAudio" in status
+    assert "pip install" not in status
+
+
+def test_doctor_survives_a_broken_optional_dependency(config_path, monkeypatch, capsys):
+    import importlib
+
+    def explode(name):
+        raise OSError("PortAudio library not found")
+
+    monkeypatch.setattr(importlib, "import_module", explode)
+    assert run(config_path, "doctor") == 0
+    assert "installé mais inutilisable" in capsys.readouterr().out
