@@ -218,3 +218,44 @@ def test_a_bucket_without_samples_reports_no_risk():
     empty = analyse(history(a=estimates((5, 0, 0))))[-1]
     assert empty.too_late_share() == 0.0
     assert empty.too_late_worst_s() == 0.0
+
+
+# -- choix de la référence -----------------------------------------------------
+
+
+def test_estimates_made_after_the_passage_never_serve_as_reference():
+    # Cas réellement observé : un train annoncé avec dix minutes de retard,
+    # stable pendant toute son approche. Une fois passé, le flux temps réel
+    # cesse de le suivre et la prédiction retombe sur l'horaire théorique. Cette
+    # valeur tardive, que personne n'a jamais vue, ne doit pas devenir la
+    # vérité — sinon toutes les estimations correctes sont comptées fautives.
+    from nexttraintosee.coverage import reference_estimate
+
+    approach = [(30, 600, 600), (10, 600, 600), (1, 600, 600)]
+    after = [(-10, 0, None), (-20, 0, None)]
+    est = estimates(*approach, *after)
+
+    reference = reference_estimate(est)
+    assert reference is not None
+    assert reference[1] == PASSAGE + timedelta(seconds=600)
+
+    stats = {s.bucket.label: s for s in analyse(history(a=est))}
+    assert stats["10 à 30 min"].too_late_share() == 0.0
+    assert stats["moins de 10 min"].too_late_share() == 0.0
+
+
+def test_delays_are_summarised_on_the_pre_passage_reference():
+    # Même situation : le retard réel est de 600 s, pas l'absence de donnée
+    # publiée après coup.
+    summary = summarise_delays(history(
+        a=estimates((30, 600, 600), (1, 600, 600), (-10, 0, None)),
+    ))
+    assert summary.with_realtime == 1
+    assert summary.median_delay_s == 600
+
+
+def test_a_passage_only_seen_after_the_fact_is_ignored():
+    from nexttraintosee.coverage import reference_estimate
+
+    assert reference_estimate(estimates((-5, 0, None))) is None
+    assert summarise_delays(history(a=estimates((-5, 0, None)))).passage_count == 0

@@ -15,9 +15,10 @@ passage *tel qu'il est alors annoncé*. C'est bien cette grandeur-là qu'il faut
 retenir, et non l'écart à l'heure finale : elle correspond au « dans X minutes »
 que lit l'utilisateur, seule information dont il dispose sur le moment.
 
-Une précaution de lecture : la dernière estimation sert de référence, ce qui
-mesure la **stabilité** de la prédiction, pas sa justesse. Une prédiction stable
-et fausse resterait indétectable ici ; seul un capteur la démasquerait.
+Une précaution de lecture : la référence est la dernière estimation *antérieure
+au passage*, ce qui mesure la **stabilité** de la prédiction, pas sa justesse.
+Une prédiction stable et fausse resterait indétectable ici ; seul un capteur la
+démasquerait.
 """
 
 from __future__ import annotations
@@ -98,6 +99,19 @@ class BucketStats:
         return max((d for d in self.drifts_s), default=0.0)
 
 
+def reference_estimate(estimates: list[Estimate]) -> Estimate | None:
+    """Dernière estimation calculée **avant** le passage qu'elle annonce.
+
+    Prendre simplement la plus récente serait faux : une fois le train passé, le
+    flux temps réel cesse de le suivre et la prédiction retombe sur l'horaire
+    théorique. Cette valeur tardive, qui n'a jamais été affichée à personne,
+    ferait alors office de vérité et condamnerait toutes les estimations
+    correctes qui l'ont précédée.
+    """
+    before = [e for e in sorted(estimates, key=lambda e: e[0]) if e[1] >= e[0]]
+    return before[-1] if before else None
+
+
 def analyse(history: History, buckets: tuple[LeadBucket, ...] = DEFAULT_BUCKETS) -> list[BucketStats]:
     """Classe les estimations par échéance et mesure couverture et dérive.
 
@@ -112,13 +126,12 @@ def analyse(history: History, buckets: tuple[LeadBucket, ...] = DEFAULT_BUCKETS)
     stats = [BucketStats(bucket) for bucket in buckets]
 
     for estimates in history.values():
-        if not estimates:
+        reference = reference_estimate(estimates)
+        if reference is None:
             continue
-        ordered = sorted(estimates, key=lambda e: e[0])
-        # La dernière estimation, la plus proche de l'événement, sert de repère.
-        final_passage = ordered[-1][1]
+        final_passage = reference[1]
 
-        for computed_at, passes_at, delay_s in ordered:
+        for computed_at, passes_at, delay_s in sorted(estimates, key=lambda e: e[0]):
             lead_s = (passes_at - computed_at).total_seconds()
             if lead_s < 0:
                 continue
@@ -158,15 +171,17 @@ class DelaySummary:
 def summarise_delays(history: History, on_time_threshold_s: float = 60.0) -> DelaySummary:
     """Résume les retards constatés sur la dernière estimation de chaque passage."""
     final_delays: list[int] = []
+    tracked = 0
     for estimates in history.values():
-        if not estimates:
+        reference = reference_estimate(estimates)
+        if reference is None:
             continue
-        delay = sorted(estimates, key=lambda e: e[0])[-1][2]
-        if delay is not None:
-            final_delays.append(delay)
+        tracked += 1
+        if reference[2] is not None:
+            final_delays.append(reference[2])
 
     return DelaySummary(
-        passage_count=len(history),
+        passage_count=tracked,
         with_realtime=len(final_delays),
         on_time=sum(1 for d in final_delays if abs(d) < on_time_threshold_s),
         median_delay_s=statistics.median(final_delays) if final_delays else None,
