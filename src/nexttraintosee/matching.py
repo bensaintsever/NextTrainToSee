@@ -13,19 +13,29 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass, replace
-from datetime import timedelta
-from typing import Callable, Iterable, Sequence
+from datetime import datetime, timedelta
+from typing import Callable, Iterable, Protocol, Sequence
 
 from .motion import Regime, TractionProfile, segment_time_s, travel_time_s
 from .predict import Passage
-from .sensor.base import Detection
+
+
+class Observable(Protocol):
+    """Tout ce qui date un passage : détection de capteur, rapport d'utilisateur."""
+
+    @property
+    def midpoint(self) -> datetime: ...
 
 
 @dataclass(frozen=True)
 class Match:
-    """Une détection appariée à un passage prédit."""
+    """Un passage rapporté, apparié au passage prédit correspondant.
 
-    detection: Detection
+    L'observation peut venir d'un capteur comme d'une personne : seule compte
+    son heure, exposée par `midpoint`.
+    """
+
+    observation: Observable
     passage: Passage
 
     @property
@@ -34,7 +44,7 @@ class Match:
 
         Positif : le train est passé plus tard que prévu.
         """
-        return (self.detection.midpoint - self.passage.when).total_seconds()
+        return (self.observation.midpoint - self.passage.when).total_seconds()
 
 
 @dataclass
@@ -42,7 +52,7 @@ class MatchResult:
     """Résultat d'un appariement sur une période."""
 
     matches: list[Match]
-    unmatched_detections: list[Detection]
+    unmatched_detections: list[Observable]
     """Passages observés sans prédiction correspondante : candidats fret."""
     unmatched_passages: list[Passage]
     """Passages prédits que le capteur n'a pas vus : suppressions, ou capteur muet."""
@@ -60,8 +70,8 @@ class MatchResult:
         )
 
 
-def match_detections(
-    detections: Sequence[Detection],
+def match_observations(
+    observations: Sequence[Observable],
     passages: Sequence[Passage],
     tolerance_s: float = 180.0,
 ) -> MatchResult:
@@ -72,12 +82,12 @@ def match_detections(
     détection précoce ne monopolise le mauvais train.
 
     Args:
-        detections: passages observés par le capteur.
+        observations: passages rapportés, capteur ou humains.
         passages: passages prédits sur la même période.
         tolerance_s: écart maximal toléré entre observé et prédit.
     """
     candidates = []
-    for detection_index, detection in enumerate(detections):
+    for detection_index, detection in enumerate(observations):
         for passage_index, passage in enumerate(passages):
             gap = abs((detection.midpoint - passage.when).total_seconds())
             if gap <= tolerance_s:
@@ -92,12 +102,12 @@ def match_detections(
             continue
         used_detections.add(detection_index)
         used_passages.add(passage_index)
-        matches.append(Match(detections[detection_index], passages[passage_index]))
+        matches.append(Match(observations[detection_index], passages[passage_index]))
 
-    matches.sort(key=lambda m: m.detection.midpoint)
+    matches.sort(key=lambda m: m.observation.midpoint)
     return MatchResult(
         matches=matches,
-        unmatched_detections=[d for i, d in enumerate(detections) if i not in used_detections],
+        unmatched_detections=[d for i, d in enumerate(observations) if i not in used_detections],
         unmatched_passages=[p for i, p in enumerate(passages) if i not in used_passages],
     )
 
@@ -183,7 +193,7 @@ def runs_from_matches(matches: Iterable[Match], distance_for: dict[str, float]) 
         distance = distance_for.get(match.passage.branch.branch_id)
         if distance is None:
             continue
-        observed = abs((match.detection.midpoint - match.passage.anchor_time).total_seconds())
+        observed = abs((match.observation.midpoint - match.passage.anchor_time).total_seconds())
         runs.append(ObservedRun(distance, match.passage.regime, observed))
     return runs
 

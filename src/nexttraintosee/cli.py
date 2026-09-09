@@ -15,7 +15,7 @@ from .config import AppConfig, ConfigError, load_config
 from .coverage import analyse, summarise_delays
 from .geo import bearing_distance_deg, initial_bearing_deg
 from .gtfs import GtfsError, GtfsFeed
-from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_detections, runs_from_matches
+from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_observations, runs_from_matches
 from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops
 from .predict import Passage, next_passages, predict_passages, service_days_around
 from .report import csv_rows, french_date, hourly_histogram, render_histogram
@@ -23,6 +23,7 @@ from .realtime import RealtimeError, empty_snapshot, load_snapshot
 from .sensor.base import PassageDetector
 from .sensor.replay import read_levels
 from .sensor.session import Status, listen_session
+from .observation import Observation, ObservationKind, from_detection
 from .store import Store
 from .validate import category_coverage, check_segments, format_duration
 
@@ -411,6 +412,71 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_time(value: str) -> datetime:
+    """Interprète « now », une heure du jour, ou une date-heure complète."""
+    if value.lower() in ("now", "maintenant"):
+        return datetime.now().astimezone()
+    for pattern in ("%H:%M:%S", "%H:%M"):
+        try:
+            parsed = datetime.strptime(value, pattern).time()
+        except ValueError:
+            continue
+        return datetime.combine(datetime.now().date(), parsed).astimezone()
+    return _moment(value)
+
+
+def cmd_observe(args: argparse.Namespace) -> int:
+    """Consigne un passage réellement vu — ou l'absence d'un passage annoncé."""
+    config = _load(args)
+    moment = _resolve_time(args.time)
+
+    with Store(config.data.database) as store:
+        window = timedelta(seconds=args.tolerance)
+        candidates = store.passages_between(
+            config.site.name, moment - window, moment + window, config.site.branches
+        )
+        candidates.sort(key=lambda p: abs((p.when - moment).total_seconds()))
+
+        bound = candidates[0] if candidates else None
+        if bound is not None and len(candidates) > 1:
+            second = abs((candidates[1].when - moment).total_seconds())
+            first = abs((bound.when - moment).total_seconds())
+            # Avec un train toutes les trois minutes, deux candidats proches
+            # rendent l'attribution douteuse : mieux vaut ne rien lier que lier
+            # au mauvais train, une observation mal attribuée faussant le
+            # recalage bien plus qu'une observation ignorée.
+            if second - first < args.tolerance / 2:
+                print(
+                    f"⚠ deux passages sont à portée ({bound.headsign} à "
+                    f"{bound.when:%H:%M:%S}, {candidates[1].headsign} à "
+                    f"{candidates[1].when:%H:%M:%S}) : observation laissée non liée."
+                )
+                bound = None
+
+        observation = Observation(
+            observed_at=None if args.not_seen else moment,
+            kind=ObservationKind.NOT_SEEN if args.not_seen else ObservationKind.SEEN,
+            source=args.source,
+            trip_id=bound.trip_id if bound else None,
+            direction=bound.direction.value if bound else None,
+            anchor_time=bound.anchor_time if bound else (None if not args.not_seen else moment),
+            precision_s=args.precision,
+            note=args.note,
+        )
+        store.record_observation(config.site.name, observation)
+
+    print(f"Enregistré : {observation.describe()}")
+    if bound is not None:
+        gap = (moment - bound.when).total_seconds()
+        print(
+            f"  rattaché à {bound.route_label} {bound.headsign} "
+            f"prédit à {bound.when:%H:%M:%S} — écart {gap:+.0f} s"
+        )
+    elif not args.not_seen:
+        print("  aucun passage prédit à portée : observation conservée telle quelle.")
+    return 0
+
+
 def cmd_calibrate(args: argparse.Namespace) -> int:
     """Confronte les passages observés aux passages prédits et recale le modèle."""
     config = _load(args)
@@ -419,17 +485,30 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
     with Store(config.data.database) as store:
         detections = store.detections_between(config.site.name, start, end)
+        reported = store.observations_between(config.site.name, start, end)
         passages = store.passages_between(config.site.name, start, end, config.site.branches)
 
-    if not detections:
-        print("Aucune détection enregistrée : lancez d'abord `listen` ou `replay --record`.")
+    # Capteur et rapports humains sont la même donnée : un instant de passage.
+    seen = [o for o in reported if o.kind is ObservationKind.SEEN]
+    observations = [from_detection(d) for d in detections] + seen
+    missed = [o for o in reported if o.kind is ObservationKind.NOT_SEEN]
+
+    if not observations:
+        print(
+            "Aucun passage rapporté. Alimentez la base par `listen`, `replay --record`,\n"
+            "ou `observe` pour une observation à la main."
+        )
         return 1
     if not passages:
         print("Aucune prédiction enregistrée : lancez d'abord `next --record`.")
         return 1
 
-    result = match_detections(detections, passages, tolerance_s=args.tolerance)
-    print(f"Sur {args.days} jour(s) : {result.summary()}\n")
+    result = match_observations(observations, passages, tolerance_s=args.tolerance)
+    print(
+        f"Sur {args.days} jour(s) : {len(detections)} détections de capteur, "
+        f"{len(seen)} rapports, {len(missed)} passages signalés absents"
+    )
+    print(f"{result.summary()}\n")
 
     if result.matches:
         calibration = calibrate(result.matches)
@@ -460,7 +539,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     if result.unmatched_detections:
         print(f"\n{len(result.unmatched_detections)} passage(s) observé(s) hors horaires publics :")
         for detection in result.unmatched_detections:
-            print(f"  {detection.started_at.strftime('%d/%m %H:%M:%S')} · {detection.describe()}")
+            print(f"  {detection.midpoint.strftime('%d/%m %H:%M:%S')} · {detection.describe()}")
         print(
             "\nCe sont les candidats fret / haut-le-pied / travaux : ils ne figurent\n"
             "dans aucun flux ouvert, seul le capteur les voit."
@@ -887,6 +966,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     covering.add_argument("--days", type=int, default=2, help="profondeur d'historique")
     covering.set_defaults(func=cmd_coverage)
+
+    observing = subparsers.add_parser(
+        "observe", help="consigner un passage réellement vu"
+    )
+    observing.add_argument("time", help="« now », HH:MM[:SS], ou une date-heure ISO 8601")
+    observing.add_argument(
+        "--not-seen", action="store_true",
+        help="le passage annoncé à cette heure n'a pas eu lieu",
+    )
+    observing.add_argument("--source", default="manuel", help="origine de l'observation")
+    observing.add_argument(
+        "--precision", type=float, default=5.0, help="précision revendiquée, en secondes"
+    )
+    observing.add_argument("--note", default="", help="remarque libre")
+    observing.add_argument(
+        "--tolerance", type=float, default=180.0,
+        help="écart maximal pour rattacher l'observation à un passage prédit",
+    )
+    observing.set_defaults(func=cmd_observe)
 
     doctor = subparsers.add_parser("doctor", help="vérifier l'environnement")
     doctor.set_defaults(func=cmd_doctor)

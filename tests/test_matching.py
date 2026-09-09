@@ -10,7 +10,7 @@ from nexttraintosee.matching import (
     ObservedRun,
     calibrate,
     fit_profile,
-    match_detections,
+    match_observations,
     runs_from_matches,
 )
 from nexttraintosee.motion import Regime, TractionProfile, travel_time_s
@@ -52,7 +52,7 @@ def passage(offset_s: float, regime: Regime = Regime.DEPARTING, trip_id: str = "
 
 
 def test_a_detection_close_to_a_prediction_is_matched():
-    result = match_detections([detection(10)], [passage(0)])
+    result = match_observations([detection(10)], [passage(0)])
 
     assert len(result.matches) == 1
     assert result.matches[0].residual_s == pytest.approx(10.0)
@@ -60,7 +60,7 @@ def test_a_detection_close_to_a_prediction_is_matched():
 
 
 def test_a_detection_beyond_tolerance_stays_unmatched():
-    result = match_detections([detection(400)], [passage(0)], tolerance_s=180)
+    result = match_observations([detection(400)], [passage(0)], tolerance_s=180)
 
     assert not result.matches
     assert len(result.unmatched_detections) == 1
@@ -68,7 +68,7 @@ def test_a_detection_beyond_tolerance_stays_unmatched():
 
 
 def test_each_detection_and_prediction_is_used_at_most_once():
-    result = match_detections([detection(0), detection(20)], [passage(5)])
+    result = match_observations([detection(0), detection(20)], [passage(5)])
 
     assert len(result.matches) == 1
     assert len(result.unmatched_detections) == 1
@@ -77,7 +77,7 @@ def test_each_detection_and_prediction_is_used_at_most_once():
 def test_matching_pairs_the_closest_candidates_first():
     # La détection à +100 s est plus proche du second train que du premier :
     # un appariement naïf dans l'ordre se tromperait.
-    result = match_detections([detection(5), detection(100)], [passage(0), passage(105)])
+    result = match_observations([detection(5), detection(100)], [passage(0), passage(105)])
 
     residuals = sorted(m.residual_s for m in result.matches)
     assert len(result.matches) == 2
@@ -86,7 +86,7 @@ def test_matching_pairs_the_closest_candidates_first():
 
 def test_unexplained_detections_are_the_freight_candidates():
     # Deux trains prédits, trois passages observés : le troisième n'est pas au GTFS.
-    result = match_detections(
+    result = match_observations(
         [detection(0), detection(300), detection(600)],
         [passage(0), passage(600)],
         tolerance_s=120,
@@ -96,21 +96,21 @@ def test_unexplained_detections_are_the_freight_candidates():
 
 
 def test_predictions_without_detection_are_reported():
-    result = match_detections([], [passage(0), passage(600)])
+    result = match_observations([], [passage(0), passage(600)])
     assert len(result.unmatched_passages) == 2
 
 
 def test_summary_reports_the_match_rate():
-    result = match_detections([detection(0)], [passage(0), passage(600)])
+    result = match_observations([detection(0)], [passage(0), passage(600)])
     assert "1 appariements sur 2" in result.summary()
 
 
 def test_matches_are_returned_in_chronological_order():
-    result = match_detections(
+    result = match_observations(
         [detection(600), detection(0)], [passage(0), passage(600)], tolerance_s=60
     )
-    assert [m.detection.midpoint for m in result.matches] == sorted(
-        m.detection.midpoint for m in result.matches
+    assert [m.observation.midpoint for m in result.matches] == sorted(
+        m.observation.midpoint for m in result.matches
     )
 
 

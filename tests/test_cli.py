@@ -146,7 +146,7 @@ def test_replay_detects_a_synthetic_passage(config_path, tmp_path, capsys):
 
 def test_calibrate_needs_observations_first(config_path, capsys):
     assert run(config_path, "calibrate") == 1
-    assert "Aucune détection" in capsys.readouterr().out
+    assert "Aucun passage rapporté" in capsys.readouterr().out
 
 
 def test_calibrate_matches_observations_against_predictions(config_path, gtfs_zip, tmp_path, capsys):
@@ -605,3 +605,82 @@ def test_days_outside_the_feed_are_marked_in_the_weekly_view(config_path, capsys
     # Le mini-GTFS s'arrête au 31/12/2026 : la semaine à cheval le montre.
     assert run(config_path, "histogram", "--day", "2026-12-29", "--week") == 0
     assert "hors du flux" in capsys.readouterr().out
+
+
+# -- observations rapportées ---------------------------------------------------
+
+
+def test_an_observation_is_bound_to_the_predicted_passage(config_path, gtfs_zip, capsys):
+    from nexttraintosee.config import load_config
+    from nexttraintosee.gtfs import GtfsFeed
+    from nexttraintosee.predict import predict_passages
+
+    assert run(config_path, "next", "--no-realtime", "--at", MORNING.isoformat(),
+               "--horizon", "600", "--record") == 0
+    capsys.readouterr()
+
+    feed = GtfsFeed.load(gtfs_zip, anchor_name="Toulouse Matabiau")
+    site = load_config(config_path).site
+    predicted = sorted(predict_passages(feed, site, MORNING.date()), key=lambda p: p.when)
+    seen_at = predicted[0].when + timedelta(seconds=18)
+
+    assert run(config_path, "observe", seen_at.isoformat()) == 0
+    out = capsys.readouterr().out
+    assert "Enregistré" in out
+    assert "rattaché à" in out
+    assert "+18 s" in out
+
+
+def test_two_nearby_passages_leave_the_observation_unbound(config_path, gtfs_zip, capsys):
+    from nexttraintosee.config import load_config
+    from nexttraintosee.gtfs import GtfsFeed
+    from nexttraintosee.predict import predict_passages
+
+    assert run(config_path, "next", "--no-realtime", "--at", MORNING.isoformat(),
+               "--horizon", "600", "--record") == 0
+    capsys.readouterr()
+
+    feed = GtfsFeed.load(gtfs_zip, anchor_name="Toulouse Matabiau")
+    site = load_config(config_path).site
+    predicted = sorted(predict_passages(feed, site, MORNING.date()), key=lambda p: p.when)
+    # À mi-chemin entre deux passages : l'attribution serait un coup de dé.
+    middle = predicted[0].when + (predicted[1].when - predicted[0].when) / 2
+
+    assert run(config_path, "observe", middle.isoformat(), "--tolerance", "900") == 0
+    out = capsys.readouterr().out
+    assert "deux passages sont à portée" in out
+    assert "non liée" in out
+
+
+def test_an_observation_without_any_prediction_is_still_kept(config_path, capsys):
+    assert run(config_path, "observe", "2026-09-09T03:00:00") == 0
+    out = capsys.readouterr().out
+    assert "Enregistré" in out
+    assert "aucun passage prédit à portée" in out
+
+
+def test_a_missed_passage_can_be_reported(config_path, capsys):
+    assert run(config_path, "observe", "2026-09-09T08:05:00", "--not-seen") == 0
+    assert "non passé" in capsys.readouterr().out
+
+
+def test_observations_feed_the_calibration(config_path, gtfs_zip, capsys):
+    from nexttraintosee.config import load_config
+    from nexttraintosee.gtfs import GtfsFeed
+    from nexttraintosee.predict import predict_passages
+
+    assert run(config_path, "next", "--no-realtime", "--at", MORNING.isoformat(),
+               "--horizon", "600", "--record") == 0
+
+    feed = GtfsFeed.load(gtfs_zip, anchor_name="Toulouse Matabiau")
+    site = load_config(config_path).site
+    predicted = sorted(predict_passages(feed, site, MORNING.date()), key=lambda p: p.when)
+    for passage in predicted[:3]:
+        assert run(config_path, "observe", (passage.when + timedelta(seconds=25)).isoformat()) == 0
+    capsys.readouterr()
+
+    until = (predicted[-1].when + timedelta(hours=1)).isoformat()
+    assert run(config_path, "calibrate", "--until", until, "--days", "1") == 0
+    out = capsys.readouterr().out
+    assert "3 rapports" in out
+    assert "+25s" in out or "+24s" in out or "+26s" in out

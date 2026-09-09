@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .motion import Regime
+from .observation import Observation, ObservationKind
 from .predict import Branch, Direction, Passage
 from .sensor.base import Detection
 
@@ -65,6 +66,23 @@ CREATE TABLE IF NOT EXISTS prediction_samples (
 
 CREATE INDEX IF NOT EXISTS samples_by_passage ON prediction_samples
     (site, trip_id, direction, anchor_time, predicted_at);
+
+-- Passages rapportés, capteur et humains confondus : c'est la même donnée.
+CREATE TABLE IF NOT EXISTS observations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    site        TEXT NOT NULL,
+    observed_at TEXT,
+    kind        TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    trip_id     TEXT,
+    direction   TEXT,
+    anchor_time TEXT,
+    precision_s REAL NOT NULL DEFAULT 5.0,
+    note        TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS observations_by_time ON observations (site, observed_at);
 
 CREATE INDEX IF NOT EXISTS detections_by_time  ON detections (site, peak_at);
 CREATE INDEX IF NOT EXISTS predictions_by_time ON predictions (site, passes_at);
@@ -230,6 +248,62 @@ class Store:
                 )
             )
         return passages
+
+    def record_observation(self, site: str, observation: Observation) -> None:
+        """Enregistre un passage rapporté."""
+        self.connection.execute(
+            """
+            INSERT INTO observations
+                (site, observed_at, kind, source, trip_id, direction,
+                 anchor_time, precision_s, note, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                site,
+                _to_db(observation.observed_at) if observation.observed_at else None,
+                observation.kind.value,
+                observation.source,
+                observation.trip_id,
+                observation.direction,
+                _to_db(observation.anchor_time) if observation.anchor_time else None,
+                observation.precision_s,
+                observation.note,
+                _to_db(datetime.now().astimezone()),
+            ),
+        )
+        self.connection.commit()
+
+    def observations_between(
+        self, site: str, start: datetime, end: datetime
+    ) -> list[Observation]:
+        """Passages rapportés sur une période.
+
+        Les passages annoncés mais non vus n'ont pas d'heure : ils sont datés
+        par l'horaire de la circulation qu'ils infirment, pour rester
+        retrouvables dans une fenêtre.
+        """
+        cursor = self.connection.execute(
+            """
+            SELECT * FROM observations
+            WHERE site = ?
+              AND COALESCE(observed_at, anchor_time, recorded_at) BETWEEN ? AND ?
+            ORDER BY COALESCE(observed_at, anchor_time, recorded_at)
+            """,
+            (site, _to_db(start), _to_db(end)),
+        )
+        return [
+            Observation(
+                observed_at=_from_db(row["observed_at"]) if row["observed_at"] else None,
+                kind=ObservationKind(row["kind"]),
+                source=row["source"],
+                trip_id=row["trip_id"],
+                direction=row["direction"],
+                anchor_time=_from_db(row["anchor_time"]) if row["anchor_time"] else None,
+                precision_s=row["precision_s"],
+                note=row["note"],
+            )
+            for row in cursor
+        ]
 
     def prediction_samples(
         self, site: str, start: datetime, end: datetime
