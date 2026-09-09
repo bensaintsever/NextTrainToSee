@@ -337,6 +337,12 @@ button {
   transition: transform .28s cubic-bezier(.2, .8, .2, 1);
   max-height: 78vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Isole la feuille dans son propre calque de composition : sans cela, le
+     navigateur peut repeindre l'illustration plein écran derrière elle à
+     chaque image du glissement, ce qui se voit comme un léger décrochage
+     sur un appareil d'entrée/milieu de gamme. */
+  will-change: transform;
 }
 
 .sheet.show { transform: translateY(0); }

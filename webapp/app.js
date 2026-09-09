@@ -518,9 +518,16 @@ async function onManualNotPassed() {
 function openSheet(sheetEl, backdropEl) {
   backdropEl.hidden = false;
   sheetEl.hidden = false;
+  // Double rAF : un seul ne garantit pas que l'état de départ
+  // (translateY(105%), juste après le passage de `display:none` à visible)
+  // ait réellement été peint avant qu'on ne lance la transition vers l'état
+  // final — sans quoi le navigateur fusionne les deux et la feuille apparaît
+  // d'un coup au lieu de glisser.
   requestAnimationFrame(() => {
-    backdropEl.classList.add('show');
-    sheetEl.classList.add('show');
+    requestAnimationFrame(() => {
+      backdropEl.classList.add('show');
+      sheetEl.classList.add('show');
+    });
   });
 }
 
@@ -533,36 +540,57 @@ function closeSheet(sheetEl, backdropEl) {
   }, 280);
 }
 
-/** Ferme la feuille par glissement vers le bas (tactile ou souris), en
- *  ignorant les gestes qui démarrent sur un élément interactif. */
+/** Ferme la feuille par glissement vers le bas (tactile ou souris).
+ *  Le geste ne démarre que sur la poignée ou le titre : lier tout le corps de
+ *  la feuille ferait concurrence au défilement de son contenu (l'histogramme
+ *  compte jusqu'à dix-huit lignes), l'un des deux perdant systématiquement en
+ *  fluidité. */
 function wireDragToClose(sheetEl, backdropEl, handleEl) {
+  const grabZones = [handleEl, sheetEl.querySelector('.sheet-title')].filter(Boolean);
+
   let startY = null;
   let dragging = false;
+  let pendingDy = null;
+  let rafId = null;
+
+  // Un `pointermove` peut se déclencher bien plus souvent que le taux de
+  // rafraîchissement de l'écran ; n'appliquer le déplacement qu'une fois par
+  // image évite de solliciter la mise en page à chaque micro-mouvement.
+  const flush = () => {
+    rafId = null;
+    if (pendingDy !== null) sheetEl.style.transform = `translateY(${pendingDy}px)`;
+  };
 
   const onDown = (ev) => {
-    const target = ev.target;
-    if (target.closest('button, input, .tab')) return;
     startY = ev.clientY;
     dragging = true;
     sheetEl.style.transition = 'none';
+    // Peut lever si le pointeur n'est plus actif à l'instant de l'appel
+    // (quelques WebView Android) : la capture n'est qu'un confort, jamais
+    // requise pour que le glissement fonctionne.
+    try { sheetEl.setPointerCapture?.(ev.pointerId); } catch { /* ignoré */ }
   };
   const onMove = (ev) => {
     if (!dragging || startY === null) return;
-    const dy = Math.max(0, ev.clientY - startY);
-    sheetEl.style.transform = `translateY(${dy}px)`;
+    pendingDy = Math.max(0, ev.clientY - startY);
+    if (rafId === null) rafId = requestAnimationFrame(flush);
   };
   const onUp = (ev) => {
     if (!dragging) return;
     dragging = false;
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     sheetEl.style.transition = '';
     const dy = startY !== null ? Math.max(0, ev.clientY - startY) : 0;
     sheetEl.style.transform = '';
     startY = null;
+    pendingDy = null;
     if (dy > 70) closeSheet(sheetEl, backdropEl);
   };
 
-  handleEl.addEventListener('pointerdown', onDown);
-  sheetEl.addEventListener('pointerdown', onDown);
+  for (const zone of grabZones) {
+    zone.style.touchAction = 'none';
+    zone.addEventListener('pointerdown', onDown);
+  }
   sheetEl.addEventListener('pointermove', onMove);
   sheetEl.addEventListener('pointerup', onUp);
   sheetEl.addEventListener('pointercancel', onUp);
