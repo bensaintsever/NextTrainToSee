@@ -50,8 +50,19 @@ def webapp_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def running_server(config: AppConfig, webapp_dir: Path):
-    """Serveur démarré sur le port 0, arrêté proprement en fin de test."""
-    service = PassageService(config, use_realtime=False, refresh_every_s=3600.0)
+    """Serveur démarré sur le port 0, arrêté proprement en fin de test.
+
+    Horloge figée sur MORNING : la route HTTP /api/next n'accepte aucun
+    paramètre `now` (à raison — un client ne doit pas dicter l'heure du
+    serveur) et retombe donc toujours sur `self._clock()`. Sans cette
+    injection, le cache était peuplé à une heure simulée fixe mais filtré à
+    l'heure réelle : les deux finissaient par diverger de plus de douze
+    heures et les passages disparaissaient de la réponse — un test qui ne
+    passait que par coïncidence, selon le moment où il était exécuté.
+    """
+    service = PassageService(
+        config, use_realtime=False, refresh_every_s=3600.0, clock=lambda: MORNING
+    )
     service.refresh(now=MORNING)
 
     server = create_server(service, host="127.0.0.1", port=0, webapp_dir=webapp_dir)

@@ -461,12 +461,29 @@ body.night .bg {
   background: rgba(255, 255, 255, .06);
   font-size: .55rem;
   padding: 8px;
+  transition: background-color .2s ease, border-color .2s ease;
 }
 
 .tab.active {
   background: rgba(255, 209, 102, .25);
   border-color: rgba(255, 209, 102, .6);
 }
+
+/* Transition Semaine ↔ Week-end : le contenu glisse dans le sens de l'onglet
+   choisi plutôt que de sauter d'un état à l'autre. Rejouée en retirant puis
+   réappliquant la classe à chaque bascule (voir playHistoTransition dans
+   app.js) ; sans effet à la première ouverture, qui n'a rien à quitter. */
+@keyframes histo-slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes histo-slide-in-left {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.histo-anim-right { animation: histo-slide-in-right .22s ease-out; }
+.histo-anim-left { animation: histo-slide-in-left .22s ease-out; }
 
 .histo-body {
   display: flex;
@@ -511,7 +528,20 @@ body.night .bg {
   text-align: center;
   color: var(--accent);
   text-shadow: var(--shadow-hard);
+  /* Hauteur réservée en permanence, sous les deux onglets à la fois : sans
+     cela, la ligne (et sa marge) disparaissait entièrement sous Semaine et
+     réapparaissait sous Week-end, si bien que la feuille changeait de
+     hauteur au moment même où son contenu glissait — retour utilisateur :
+     « pas smooth ». Visibilité pilotée par l'opacité, jamais par `hidden`,
+     pour que l'espace reste occupé dans les deux cas. */
+  min-height: 1.6em;
+  line-height: 1.6;
+  margin: 12px 0 0;
+  opacity: 0;
+  transition: opacity .18s ease;
 }
+
+.histo-compare.is-visible { opacity: 1; }
 
 /* Petits écrans en hauteur (SE, mini) : on resserre un peu. */
 @media (max-height: 700px) {

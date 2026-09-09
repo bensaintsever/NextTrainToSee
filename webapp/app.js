@@ -66,6 +66,7 @@ let pendingManualPassage = null;
 
 let histoData = null;
 let histoTab = 'weekday';
+let histoLastTab = null; // dernier onglet rendu : détermine le sens du glissement
 
 // Décalage appliqué aux horaires de démonstration de assets/mock.json, fixé
 // une fois puis reconduit pour que la démo se déroule en temps réel (compte
@@ -688,17 +689,24 @@ const histoBackdropEl = document.getElementById('histo-backdrop');
 const histoBodyEl = document.getElementById('histo-body');
 const histoCompareEl = document.getElementById('histo-compare');
 
+/** Bascule la phrase de comparaison sans jamais la retirer du flux — sa
+ *  hauteur reste réservée en permanence (voir app.css) : c'est ce qui évite
+ *  à la feuille de changer de taille en changeant d'onglet. */
+function setCompareVisible(visible) {
+  histoCompareEl.classList.toggle('is-visible', visible);
+}
+
 async function openHistogram() {
   openSheet(histoSheetEl, histoBackdropEl);
   if (histoData) { renderHistoTab(); return; }
   histoBodyEl.textContent = 'Chargement…';
-  histoCompareEl.hidden = true;
+  setCompareVisible(false);
   try {
     histoData = await fetchJson('/api/histogram');
     renderHistoTab();
   } catch (err) {
     histoBodyEl.textContent = 'Statistiques indisponibles pour le moment.';
-    histoCompareEl.hidden = true;
+    setCompareVisible(false);
   }
 }
 
@@ -709,10 +717,21 @@ function formatRatioFr(r) {
   return `${fmtNumberFr(val, 1)}×`;
 }
 
+// Ordre visuel des onglets (Semaine à gauche, Week-end à droite) : détermine
+// le sens du glissement, pour que l'animation suive le doigt plutôt que de
+// sembler arbitraire.
+const HISTO_TAB_ORDER = ['weekday', 'weekend'];
+
 function renderHistoTab() {
   if (!histoData) return;
   const series = histoData[histoTab];
   const peak = histoData.peak || 1;
+
+  // Rejoué seulement lors d'un vrai changement d'onglet — jamais au premier
+  // rendu, qui n'a rien à quitter.
+  const animate = histoLastTab !== null && histoLastTab !== histoTab;
+  const forward = HISTO_TAB_ORDER.indexOf(histoTab) > HISTO_TAB_ORDER.indexOf(histoLastTab);
+  histoLastTab = histoTab;
 
   histoBodyEl.innerHTML = '';
   series.hours.forEach((h) => {
@@ -747,12 +766,30 @@ function renderHistoTab() {
     if (sumWeekend > 0 && sumWeekday > 0) {
       const ratio = sumWeekday / sumWeekend;
       histoCompareEl.textContent = `Le week-end, ~${formatRatioFr(ratio)} moins de trains qu'en semaine.`;
-      histoCompareEl.hidden = false;
+      setCompareVisible(true);
     } else {
-      histoCompareEl.hidden = true;
+      setCompareVisible(false);
     }
   } else {
-    histoCompareEl.hidden = true;
+    setCompareVisible(false);
+  }
+
+  if (animate) playHistoTransition(forward);
+}
+
+/** Rejoue l'animation d'entrée sur le corps du tableau et la phrase de
+ *  comparaison — deux éléments distincts dans le DOM (§ voir index.html),
+ *  animés ensemble pour rester perçus comme un seul bloc qui glisse. Retirer
+ *  puis réappliquer la classe (avec un reflow forcé entre les deux) est le
+ *  moyen standard de rejouer une animation CSS sur le même élément d'un appui
+ *  à l'autre — sans cela, la deuxième bascule vers un onglet déjà visité ne
+ *  se rejoue pas, la classe étant déjà présente. */
+function playHistoTransition(forward) {
+  const cls = forward ? 'histo-anim-right' : 'histo-anim-left';
+  for (const el of [histoBodyEl, histoCompareEl]) {
+    el.classList.remove('histo-anim-right', 'histo-anim-left');
+    void el.offsetWidth; // force le reflow : sans lui, remove+add se fondent en un no-op
+    el.classList.add(cls);
   }
 }
 
