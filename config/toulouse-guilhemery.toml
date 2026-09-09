@@ -1,0 +1,67 @@
+# Point d'observation : 43°35'52.2"N 1°27'29.5"E
+#
+# ATTENTION — les valeurs marquées « À MESURER » sont des estimations calculées
+# à la table, faute d'accès réseau au moment de la rédaction. Lancez
+# `nexttraintosee tracks -c config/toulouse-guilhemery.toml` pour les remplacer
+# par les valeurs réellement mesurées sur la géométrie OpenStreetMap.
+
+[site]
+name = "Toulouse — sud de Matabiau (Guilheméry / Port Saint-Sauveur)"
+lat = 43.597833
+lon = 1.458194
+anchor_station = "Toulouse Matabiau"
+anchor_lat = 43.6112
+anchor_lon = 1.4535
+search_radius_m = 500
+
+[profile]
+# Automoteur régional en sortie de gare urbaine. À recaler avec `calibrate`.
+accel_ms2 = 0.5
+decel_ms2 = 0.6
+line_speed_kmh = 90.0
+sinuosity = 1.05
+
+# --- Branches au départ de Toulouse-Matabiau --------------------------------
+# `bearing_deg` = cap depuis la gare vers les gares situées sur la branche.
+# `passes_observer` = cette branche passe-t-elle devant le point d'observation ?
+
+[[branches]]
+id = "se"
+label = "Axe Narbonne / Sète (via Montaudran)"
+bearing_deg = 137.5
+passes_observer = true
+track_distance_m = 1650.0   # À MESURER (estimation : 1534 m à vol d'oiseau × sinuosité)
+
+[[branches]]
+id = "sud"
+label = "Axe Latour-de-Carol / Auch (via Saint-Agne)"
+bearing_deg = 184.2
+passes_observer = true      # À VÉRIFIER : dépend de l'écartement des faisceaux
+track_distance_m = 1600.0   # À MESURER
+
+[[branches]]
+id = "nord"
+label = "Axe Bordeaux / Montauban"
+bearing_deg = 348.6
+passes_observer = false
+
+[[branches]]
+id = "ouest"
+label = "Axe Auch / Bayonne (via Colomiers)"
+bearing_deg = 269.8
+passes_observer = false
+
+[data]
+gtfs_path = "../data/sncf-gtfs.zip"
+overpass_cache = "../cache/overpass"
+database = "../data/nexttraintosee.sqlite"
+
+[sensor]
+trigger_db = 9.0
+release_db = 4.0
+min_duration_s = 3.0
+max_duration_s = 120.0
+refractory_s = 15.0
+baseline_half_life_s = 90.0
+sample_rate_hz = 16000
+block_seconds = 0.5

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexttraintosee"
+version = "0.1.0"
+description = "Prédire le passage des trains devant un point d'observation quelconque"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+# Temps réel : décodage des flux GTFS-RT (protobuf).
+realtime = ["gtfs-realtime-bindings>=1.0", "protobuf>=4.21"]
+# Capteur audio local.
+sensor = ["numpy>=1.24", "sounddevice>=0.4"]
+dev = ["pytest>=8", "numpy>=1.24"]
+
+[project.scripts]
+nexttraintosee = "nexttraintosee.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
