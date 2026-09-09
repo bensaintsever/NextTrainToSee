@@ -853,6 +853,23 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lan_ip() -> str | None:
+    """Adresse IP locale du poste, telle que la verrait un téléphone du réseau.
+
+    Ouvrir un socket UDP vers une adresse extérieure ne transmet rien : cela ne
+    sert qu'à demander au système quelle interface il choisirait.
+    """
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.0.2.1", 80))
+            return probe.getsockname()[0]
+        finally:
+            probe.close()
+    except OSError:
+        return None
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Sert la PWA et l'API HTTP décrites par le contrat du projet (§ 4)."""
     config = _load(args)
@@ -871,10 +888,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
     server = create_server(service, host=args.host, port=args.port, webapp_dir=webapp_dir)
     port = server.server_address[1]
     hostname = socket.gethostname()
+    lan_ip = _lan_ip()
 
     print(f"{config.site.name}")
     print(f"Serveur démarré sur http://{args.host}:{port}")
-    print(f"Depuis le téléphone (même Wi-Fi) : http://{hostname}.local:{port}")
+    if lan_ip:
+        # Android ne résout pas les noms mDNS en « .local » de façon fiable :
+        # l'adresse IP est la seule qui fonctionne à coup sûr sur un Pixel.
+        print(f"Depuis le téléphone (même Wi-Fi) : http://{lan_ip}:{port}")
+        print(f"                     (ou, si iOS : http://{hostname}.local:{port})")
+    else:
+        print(f"Depuis le téléphone (même Wi-Fi) : http://{hostname}.local:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
