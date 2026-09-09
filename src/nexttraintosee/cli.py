@@ -6,6 +6,7 @@ import argparse
 import csv
 import importlib
 import logging
+import socket
 import sys
 from collections import Counter
 from datetime import datetime, timedelta
@@ -24,6 +25,8 @@ from .sensor.base import PassageDetector
 from .sensor.replay import read_levels
 from .sensor.session import Status, listen_session
 from .observation import Observation, ObservationKind, from_detection
+from .server import DEFAULT_WEBAPP_DIR, create_server
+from .service import PassageService, bind_passage
 from .store import Store
 from .validate import category_coverage, check_segments, format_duration
 
@@ -435,23 +438,17 @@ def cmd_observe(args: argparse.Namespace) -> int:
         candidates = store.passages_between(
             config.site.name, moment - window, moment + window, config.site.branches
         )
-        candidates.sort(key=lambda p: abs((p.when - moment).total_seconds()))
-
-        bound = candidates[0] if candidates else None
-        if bound is not None and len(candidates) > 1:
-            second = abs((candidates[1].when - moment).total_seconds())
-            first = abs((bound.when - moment).total_seconds())
-            # Avec un train toutes les trois minutes, deux candidats proches
-            # rendent l'attribution douteuse : mieux vaut ne rien lier que lier
-            # au mauvais train, une observation mal attribuée faussant le
-            # recalage bien plus qu'une observation ignorée.
-            if second - first < args.tolerance / 2:
-                print(
-                    f"⚠ deux passages sont à portée ({bound.headsign} à "
-                    f"{bound.when:%H:%M:%S}, {candidates[1].headsign} à "
-                    f"{candidates[1].when:%H:%M:%S}) : observation laissée non liée."
-                )
-                bound = None
+        # Rattachement au passage prédit le plus proche : même règle qu'expose
+        # le serveur HTTP sur `POST /api/observe` (module partagé `service`).
+        binding = bind_passage(candidates, moment, args.tolerance)
+        if binding.ambiguous:
+            first, second = binding.candidates[0], binding.candidates[1]
+            print(
+                f"⚠ deux passages sont à portée ({first.headsign} à "
+                f"{first.when:%H:%M:%S}, {second.headsign} à "
+                f"{second.when:%H:%M:%S}) : observation laissée non liée."
+            )
+        bound = binding.passage
 
         observation = Observation(
             observed_at=None if args.not_seen else moment,
@@ -856,6 +853,39 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Sert la PWA et l'API HTTP décrites par le contrat du projet (§ 4)."""
+    config = _load(args)
+    try:
+        service = PassageService(config, refresh_every_s=args.refresh_every)
+    except GtfsError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    # Premier chargement synchrone : le cache n'est jamais vide au démarrage,
+    # même si la boucle périodique n'a pas encore tourné.
+    service.refresh()
+    service.start()
+
+    webapp_dir = args.webapp_dir if args.webapp_dir is not None else DEFAULT_WEBAPP_DIR
+    server = create_server(service, host=args.host, port=args.port, webapp_dir=webapp_dir)
+    port = server.server_address[1]
+    hostname = socket.gethostname()
+
+    print(f"{config.site.name}")
+    print(f"Serveur démarré sur http://{args.host}:{port}")
+    print(f"Depuis le téléphone (même Wi-Fi) : http://{hostname}.local:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nArrêt du serveur.")
+    finally:
+        service.stop()
+        server.shutdown()
+        server.server_close()
+    return 0
+
+
 # -- point d'entrée ----------------------------------------------------------
 
 
@@ -988,6 +1018,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="vérifier l'environnement")
     doctor.set_defaults(func=cmd_doctor)
+
+    serving = subparsers.add_parser(
+        "serve", help="servir la PWA et l'API HTTP (téléphone, même Wi-Fi)"
+    )
+    serving.add_argument("--port", type=int, default=8770, help="port d'écoute")
+    serving.add_argument("--host", default="0.0.0.0", help="adresse d'écoute")
+    serving.add_argument(
+        "--refresh-every", type=float, default=90.0,
+        help="intervalle de rafraîchissement du temps réel, en secondes",
+    )
+    serving.add_argument(
+        "--webapp-dir", type=Path, default=None,
+        help="dossier statique à servir (par défaut : webapp/ du dépôt)",
+    )
+    serving.set_defaults(func=cmd_serve)
 
     return parser
 
