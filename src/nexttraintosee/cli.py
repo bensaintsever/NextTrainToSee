@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import AppConfig, ConfigError, load_config
+from .coverage import analyse, summarise_delays
 from .geo import bearing_distance_deg, initial_bearing_deg
 from .gtfs import GtfsError, GtfsFeed
 from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_detections, runs_from_matches
@@ -584,6 +585,61 @@ def _print_speed_fit(config: AppConfig, feed, checks) -> None:
         print()
 
 
+def cmd_coverage(args: argparse.Namespace) -> int:
+    """Mesure ce que valent les prédictions à l'avance, d'après l'historique."""
+    config = _load(args)
+    end = datetime.now().astimezone() + timedelta(days=args.days)
+    start = end - timedelta(days=args.days * 2)
+
+    with Store(config.data.database) as store:
+        history = store.prediction_samples(config.site.name, start, end)
+
+    if not history:
+        print(
+            "Aucun historique. Enregistrez des prédictions à intervalles réguliers :\n"
+            "  while true; do nexttraintosee next --record --horizon 120; sleep 180; done"
+        )
+        return 1
+
+    repeated = sum(1 for estimates in history.values() if len(estimates) > 1)
+    print(f"{len(history)} passages suivis, dont {repeated} estimés plusieurs fois\n")
+
+    print(f"{'échéance':<20s} {'estimations':>11s} {'temps réel':>11s} "
+          f"{'dérive méd.':>12s} {'dérive p90':>11s}")
+    for entry in analyse(history):
+        if not entry.sample_count:
+            print(f"{entry.bucket.label:<20s} {'—':>11s}")
+            continue
+        median = entry.drift_median_s
+        worst = entry.drift_worst_s
+        print(
+            f"{entry.bucket.label:<20s} {entry.sample_count:>11d} "
+            f"{entry.realtime_share:>10.0%} "
+            f"{(f'{median:.0f} s' if median is not None else '—'):>12s} "
+            f"{(f'{worst:.0f} s' if worst is not None else '—'):>11s}"
+        )
+
+    summary = summarise_delays(history)
+    print(
+        f"\nRetards : {summary.with_realtime}/{summary.passage_count} passages suivis en "
+        f"temps réel ({summary.realtime_share:.0%})"
+    )
+    if summary.with_realtime:
+        print(
+            f"          {summary.on_time_share:.0%} à l'heure (moins d'une minute), "
+            f"médiane {summary.median_delay_s:+.0f} s, "
+            f"pire {summary.worst_delay_s:+.0f} s"
+        )
+
+    print(
+        "\nLecture : la dérive mesure de combien l'heure annoncée bouge encore avant\n"
+        "le passage — c'est l'erreur que verrait quelqu'un consultant l'application à\n"
+        "cette échéance. Elle mesure la stabilité, pas la justesse : une prédiction\n"
+        "stable et fausse passerait inaperçue ici, seul un capteur la démasquerait."
+    )
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Vérifie ce qui est disponible dans l'environnement."""
     config = _load(args)
@@ -702,6 +758,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--fit", action="store_true", help="proposer une vitesse de ligne par branche"
     )
     validating.set_defaults(func=cmd_validate)
+
+    covering = subparsers.add_parser(
+        "coverage", help="mesurer couverture temps réel et stabilité des prédictions"
+    )
+    covering.add_argument("--days", type=int, default=2, help="profondeur d'historique")
+    covering.set_defaults(func=cmd_coverage)
 
     doctor = subparsers.add_parser("doctor", help="vérifier l'environnement")
     doctor.set_defaults(func=cmd_doctor)

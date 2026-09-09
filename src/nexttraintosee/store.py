@@ -50,6 +50,22 @@ CREATE TABLE IF NOT EXISTS predictions (
     PRIMARY KEY (site, trip_id, direction, anchor_time)
 );
 
+-- Historique append-only : `predictions` ne garde que la dernière estimation,
+-- alors que mesurer la dérive d'une prédiction exige de conserver chacune.
+CREATE TABLE IF NOT EXISTS prediction_samples (
+    site         TEXT NOT NULL,
+    trip_id      TEXT NOT NULL,
+    direction    TEXT NOT NULL,
+    anchor_time  TEXT NOT NULL,
+    predicted_at TEXT NOT NULL,
+    passes_at    TEXT NOT NULL,
+    delay_s      INTEGER,
+    PRIMARY KEY (site, trip_id, direction, anchor_time, predicted_at)
+);
+
+CREATE INDEX IF NOT EXISTS samples_by_passage ON prediction_samples
+    (site, trip_id, direction, anchor_time, predicted_at);
+
 CREATE INDEX IF NOT EXISTS detections_by_time  ON detections (site, peak_at);
 CREATE INDEX IF NOT EXISTS predictions_by_time ON predictions (site, passes_at);
 """
@@ -140,6 +156,14 @@ class Store:
         ]
         self.connection.executemany(
             """
+            INSERT OR IGNORE INTO prediction_samples
+                (site, trip_id, direction, anchor_time, predicted_at, passes_at, delay_s)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [(r[0], r[1], r[2], r[3], r[4], r[7], r[12]) for r in rows],
+        )
+        self.connection.executemany(
+            """
             INSERT OR REPLACE INTO predictions
                 (site, trip_id, direction, anchor_time, predicted_at, branch_id,
                  regime, passes_at, uncertainty_s, speed_kmh, route_label, headsign, delay_s)
@@ -206,6 +230,32 @@ class Store:
                 )
             )
         return passages
+
+    def prediction_samples(
+        self, site: str, start: datetime, end: datetime
+    ) -> dict[tuple[str, str, str], list[tuple[datetime, datetime, int | None]]]:
+        """Historique des estimations, groupé par passage.
+
+        Chaque passage est identifié par sa circulation, son sens et son horaire
+        en gare ; la liste donne, dans l'ordre, les couples (instant du calcul,
+        heure de passage estimée, retard appliqué).
+        """
+        cursor = self.connection.execute(
+            """
+            SELECT trip_id, direction, anchor_time, predicted_at, passes_at, delay_s
+            FROM prediction_samples
+            WHERE site = ? AND passes_at BETWEEN ? AND ?
+            ORDER BY predicted_at
+            """,
+            (site, _to_db(start), _to_db(end)),
+        )
+        history: dict[tuple[str, str, str], list[tuple[datetime, datetime, int | None]]] = {}
+        for row in cursor:
+            key = (row["trip_id"], row["direction"], row["anchor_time"])
+            history.setdefault(key, []).append(
+                (_from_db(row["predicted_at"]), _from_db(row["passes_at"]), row["delay_s"])
+            )
+        return history
 
     def counts(self, site: str) -> tuple[int, int]:
         """Nombre de détections et de prédictions enregistrées."""
