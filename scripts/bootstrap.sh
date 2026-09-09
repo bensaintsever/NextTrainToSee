@@ -13,11 +13,33 @@ CONFIG="${1:-config/toulouse-guilhemery.toml}"
 GTFS_URL="https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip"
 GTFS_PATH="data/sncf-gtfs.zip"
 VENV=".venv"
+# iCloud synchronise ~/Documents et ~/Desktop quand « Bureau et Documents » est
+# activé. Un environnement virtuel qui s'y trouve est réécrit dans le dos de
+# pip : fichiers dupliqués en « nom 2.ext », marqués « hidden », parfois évincés
+# du disque. macOS exclut de la synchronisation tout dossier suffixé .nosync :
+# on y place le venv et on laisse un lien symbolique .venv, de sorte que les
+# commandes habituelles continuent de fonctionner.
+NOSYNC_VENV=".venv.nosync"
 
 cd "$(dirname "$0")/.."
 
 say()  { printf '\n\033[1m▸ %s\033[0m\n' "$1"; }
 warn() { printf '\033[33m  ! %s\033[0m\n' "$1"; }
+
+is_icloud_synced() {
+    [ "$(uname)" = "Darwin" ] || return 1
+    [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs" ] || return 1
+    case "$(pwd -P)/" in
+        "$HOME/Documents/"*|"$HOME/Desktop/"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Supprime les copies de conflit iCloud (« fichier 2.ext ») d'un dossier.
+purge_icloud_duplicates() {
+    [ "$(uname)" = "Darwin" ] || return 0
+    find "$1" \( -name "* [0-9]" -o -name "* [0-9].*" \) -delete 2>/dev/null || true
+}
 
 # --- 1. Python ---------------------------------------------------------------
 
@@ -36,11 +58,26 @@ PY
 
 # --- 2. Environnement virtuel ------------------------------------------------
 
-if [ ! -d "$VENV" ]; then
-    say "Création de l'environnement virtuel ($VENV)"
-    python3 -m venv "$VENV"
+if [ ! -e "$VENV" ]; then
+    if is_icloud_synced; then
+        say "Création de l'environnement virtuel ($NOSYNC_VENV, hors iCloud)"
+        warn "ce dossier est synchronisé par iCloud : le venv est placé à côté,"
+        warn "dans $NOSYNC_VENV, que macOS exclut de la synchronisation."
+        python3 -m venv "$NOSYNC_VENV"
+        ln -s "$NOSYNC_VENV" "$VENV"
+    else
+        say "Création de l'environnement virtuel ($VENV)"
+        python3 -m venv "$VENV"
+    fi
+elif [ -L "$VENV" ]; then
+    say "Environnement virtuel déjà présent ($(readlink "$VENV"), hors iCloud)"
 else
     say "Environnement virtuel déjà présent ($VENV)"
+    if is_icloud_synced; then
+        warn "ce venv est dans un dossier synchronisé par iCloud, qui va le corrompre"
+        warn "à répétition. Pour le déplacer hors synchronisation, une seule fois :"
+        warn "  mv $VENV $NOSYNC_VENV && ln -s $NOSYNC_VENV $VENV"
+    fi
 fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
@@ -60,13 +97,14 @@ fi
 
 # --- 3 bis. Vérification que l'installation éditable fonctionne --------------
 
-# Sur macOS, le fichier .pth de l'installation éditable se retrouve parfois
-# marqué « hidden » par le système de fichiers. Python 3.13+ ignore
-# délibérément les .pth cachés : l'installation ne fait alors strictement rien,
-# sans le moindre message, et la commande reste introuvable.
+# Le fichier .pth de l'installation éditable se retrouve parfois marqué
+# « hidden » par macOS, et Python 3.13+ ignore délibérément les .pth cachés :
+# l'installation ne fait alors strictement rien, sans le moindre message, et la
+# commande reste introuvable alors que pip a réussi.
 if ! python -c "import nexttraintosee" >/dev/null 2>&1; then
     if [ "$(uname)" = "Darwin" ]; then
-        warn "installation éditable inopérante ; retrait du flag « hidden » sur les .pth"
+        warn "installation éditable inopérante ; nettoyage des interférences macOS"
+        purge_icloud_duplicates "$VENV"/lib/python*/site-packages
         chflags nohidden "$VENV"/lib/python*/site-packages/*.pth 2>/dev/null || true
     fi
     if ! python -c "import nexttraintosee" >/dev/null 2>&1; then

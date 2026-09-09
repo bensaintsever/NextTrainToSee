@@ -157,17 +157,25 @@ La configuration de Toulouse porte des **valeurs mesurées**, plus des
 estimations : 1 564 m par la voie jusqu'à Matabiau pour l'axe de Saint-Agne
 (dont les voies passent à 1 m du point), 1 565 m pour l'axe de Narbonne.
 
-### Un piège macOS
+### Un piège macOS : iCloud et les environnements virtuels
 
-Sur macOS, le fichier `.pth` de l'installation éditable se retrouve parfois
-marqué « hidden » par le système de fichiers — et **Python 3.13+ ignore
-délibérément les `.pth` cachés**. L'installation ne fait alors rien, sans le
-moindre message : `import nexttraintosee` échoue alors que `pip` a réussi.
+Si le dépôt est dans `~/Documents` ou `~/Desktop` avec « Bureau et Documents »
+activé, **iCloud synchronise aussi l'environnement virtuel** — et le corrompt :
+fichiers dupliqués en `nom 2.ext`, marqués « hidden », parfois évincés du disque.
 
-`scripts/bootstrap.sh` détecte et répare le cas. À la main :
+Le symptôme est déroutant : `pip install -e .` réussit, mais
+`import nexttraintosee` échoue. En cause, le fichier `.pth` de l'installation
+éditable marqué « hidden » par iCloud, que **Python 3.13+ ignore
+délibérément** — sans le moindre message.
+
+`scripts/bootstrap.sh` crée désormais le venv dans `.venv.nosync/`, suffixe que
+macOS exclut de la synchronisation, avec un lien symbolique `.venv` pour que les
+commandes habituelles ne changent pas. Pour un venv existant :
 
 ```bash
+mv .venv .venv.nosync && ln -s .venv.nosync .venv
 chflags nohidden .venv/lib/python*/site-packages/*.pth
+find .venv -name "* [0-9]*" -delete      # copies de conflit iCloud
 ```
 
 ## Licence

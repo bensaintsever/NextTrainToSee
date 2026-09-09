@@ -4,7 +4,10 @@ __pycache__/
 .eggs/
 build/
 dist/
-.venv/
+# `.venv` sans barre oblique : hors iCloud, c'est un lien symbolique vers
+# .venv.nosync, et « .venv/ » ne filtrerait qu'un vrai dossier.
+.venv
+.venv.nosync
 venv/
 
 # Données volumineuses et caches : rejouables, jamais versionnés.
