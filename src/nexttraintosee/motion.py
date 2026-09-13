@@ -215,13 +215,19 @@ def travel_time_uncertainty_s(
     profile: TractionProfile,
     accel_rel_tol: float = 0.30,
     speed_rel_tol: float = 0.20,
+    distance_uncertainty_m: float = 0.0,
 ) -> float:
     """Demi-largeur de l'incertitude sur le temps de parcours.
 
-    On fait varier accélération et vitesse limite dans leurs tolérances et on
-    prend la demi-amplitude des temps extrêmes. C'est grossier mais honnête :
-    l'erreur dominante à 1-2 km d'une gare vient de la marche du train, pas de
-    la géométrie.
+    On combine les sources d'erreur en prenant les cas extrêmes : le train le
+    plus vif sur la distance la plus courte, le plus mou sur la plus longue.
+    C'est grossier mais honnête, et surtout cela ne présente pas une distance
+    seulement estimée avec la précision d'une distance mesurée.
+
+    Args:
+        distance_uncertainty_m: marge sur la distance gare <-> point. Quelques
+            mètres quand la géométrie vient d'OpenStreetMap, plusieurs dizaines
+            quand elle est déduite du vol d'oiseau.
     """
     fast = replace(
         profile,
@@ -235,6 +241,8 @@ def travel_time_uncertainty_s(
         decel_ms2=profile.decel_ms2 * (1 - accel_rel_tol),
         line_speed_kmh=profile.line_speed_kmh * (1 - speed_rel_tol),
     )
+    shortest = max(0.0, distance_m - distance_uncertainty_m)
+    longest = distance_m + distance_uncertainty_m
     return abs(
-        travel_time_s(distance_m, regime, slow) - travel_time_s(distance_m, regime, fast)
+        travel_time_s(longest, regime, slow) - travel_time_s(shortest, regime, fast)
     ) / 2

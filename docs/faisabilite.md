@@ -196,11 +196,20 @@ du temps en aval sans que cela change son heure de passage ici.
 
 | Source d'erreur | Ordre de grandeur | Réductible ? |
 | --- | ---: | --- |
-| Modèle de marche (accélération, vitesse réelle) | ±13 à ±20 s *(mesuré)* | **oui** — par recalage capteur |
-| Distance gare → point | ±0 s — **mesurée** à 1 564 m | fait |
+| Modèle de marche (accélération, vitesse réelle) | ±14 à ±20 s *(mesuré)* | **oui** — par recalage capteur |
+| Distance gare → point, **mesurée** à 1 564 m (±20 m) | +0,7 à +1,1 s | fait |
+| Distance gare → point, seulement estimée (nouveau site) | +4 à +7 s | **oui** — par `tracks` |
 | Fraîcheur du temps réel (flux à 2 min) | ±5 à 30 s | non |
 | Arrondi des horaires GTFS à la minute | ±30 s | partiellement, via le temps réel |
 | Voie empruntée dans le faisceau | ±2 s | négligeable |
+
+Les deux lignes de distance sont exclusives : une branche dont `track_distance_m`
+est renseigné relève de la première, une branche sans mesure de la seconde. Le
+cas estimé est visible dans la sortie, qui affiche `±~` au lieu de `±` : mieux
+vaut une fenêtre honnêtement large qu'une fenêtre étroite fondée sur une
+distance déduite. Concrètement, sur l'axe de Saint-Agne, ±14,5 s mesuré contre
+±18,0 s estimé — `tracks` resserre la fenêtre, mais un nouveau site peut
+commencer à prédire sans l'avoir lancé.
 
 **Sans rien faire** : la prédiction théorique seule donne une fenêtre de l'ordre
 de ±45 s — largement suffisant pour « il y en a un dans 4 minutes », insuffisant

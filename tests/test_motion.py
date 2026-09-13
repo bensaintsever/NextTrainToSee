@@ -175,3 +175,20 @@ def test_a_zero_length_segment_is_harmless():
 
     assert segment_time_s(0.0, TractionProfile()) == 0.0
     assert segment_fraction(0.0, 0.0, TractionProfile()) == 0.0
+
+
+def test_an_uncertain_distance_widens_the_window():
+    profile = TractionProfile()
+    precise = travel_time_uncertainty_s(1600.0, Regime.DEPARTING, profile)
+    vague = travel_time_uncertainty_s(
+        1600.0, Regime.DEPARTING, profile, distance_uncertainty_m=130.0
+    )
+    assert vague > precise
+
+
+def test_a_certain_distance_changes_nothing():
+    # Sans marge de distance, le calcul doit rester exactement celui d'avant.
+    profile = TractionProfile()
+    assert travel_time_uncertainty_s(
+        1600.0, Regime.DEPARTING, profile, distance_uncertainty_m=0.0
+    ) == travel_time_uncertainty_s(1600.0, Regime.DEPARTING, profile)

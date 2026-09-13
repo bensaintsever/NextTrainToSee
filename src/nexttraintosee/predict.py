@@ -34,6 +34,12 @@ from .motion import Regime, TractionProfile, speed_at_point_ms, travel_time_s, t
 
 log = logging.getLogger(__name__)
 
+#: Marge résiduelle sur une distance relevée sur la géométrie OpenStreetMap.
+MEASURED_DISTANCE_TOLERANCE_M = 20.0
+#: Marge sur une distance seulement déduite du vol d'oiseau : la sinuosité réelle
+#: d'une sortie de gare varie largement d'un site à l'autre.
+ESTIMATED_DISTANCE_REL_TOLERANCE = 0.08
+
 
 class Direction(str, Enum):
     """Sens de circulation vu depuis la gare d'appui."""
@@ -75,6 +81,11 @@ class Branch:
     """Vitesse limite locale, si elle diffère du profil par défaut."""
     corridor_id: str | None = None
     """Corridor OSM correspondant, à titre de traçabilité."""
+
+    @property
+    def is_distance_measured(self) -> bool:
+        """Vrai si la distance vient de la géométrie, et non d'une estimation."""
+        return self.track_distance_m is not None
 
     def matches(self, bearing_deg: float) -> bool:
         return bearing_distance_deg(self.bearing_deg, bearing_deg) <= self.tolerance_deg
@@ -216,6 +227,15 @@ class Passage:
         margin = timedelta(seconds=self.uncertainty_s)
         return (self.when - margin, self.when + margin)
 
+    @property
+    def margin_marker(self) -> str:
+        """« ± » sur une distance mesurée, « ±~ » sur une distance estimée.
+
+        L'incertitude reste juste dans les deux cas, mais sa nature diffère :
+        le tilde dit que `tracks` peut encore resserrer la fenêtre.
+        """
+        return "±" if self.branch.is_distance_measured else "±~"
+
     def describe(self) -> str:
         arrow = "→" if self.direction is Direction.OUTBOUND else "←"
         stamp = self.when.strftime("%H:%M:%S")
@@ -225,8 +245,9 @@ class Passage:
             delay = f" ({self.delay_s // 60:+d} min)"
         category = f" [{self.category_id}]" if self.category_id else ""
         return (
-            f"{stamp} ±{self.uncertainty_s:.0f}s [{flag}] {arrow} {self.branch.label} "
-            f"· {self.route_label} {self.headsign}{category}{delay} · {self.speed_kmh:.0f} km/h"
+            f"{stamp} {self.margin_marker}{self.uncertainty_s:.0f}s [{flag}] {arrow} "
+            f"{self.branch.label} · {self.route_label} {self.headsign}{category}{delay} "
+            f"· {self.speed_kmh:.0f} km/h"
         )
 
     def describe_watch(self) -> str:
@@ -235,7 +256,8 @@ class Passage:
         category = f" [{self.category_id}]" if self.category_id else ""
         return (
             f"guetter dès {self.announce_at.strftime('%H:%M:%S')} · "
-            f"passage vers {self.when.strftime('%H:%M:%S')} (±{self.uncertainty_s:.0f} s) "
+            f"passage vers {self.when.strftime('%H:%M:%S')} "
+            f"({self.margin_marker}{self.uncertainty_s:.0f} s) "
             f"{arrow} {self.branch.label} · {self.route_label} {self.headsign}{category}"
         )
 
@@ -253,12 +275,18 @@ def _anchor_position(feed: GtfsFeed, site: Site) -> LatLon:
     )
 
 
-def _distance_to_observer_m(site: Site, branch: Branch, anchor: LatLon) -> float:
-    """Distance à parcourir entre la gare d'appui et le point d'observation."""
+def _distance_to_observer_m(site: Site, branch: Branch, anchor: LatLon) -> tuple[float, float]:
+    """Distance gare d'appui -> point, et la marge à lui associer.
+
+    Une distance mesurée sur OSM et une distance déduite du vol d'oiseau ne
+    valent pas la même chose : renvoyer la marge avec la valeur évite de
+    présenter la seconde avec la précision de la première.
+    """
     if branch.track_distance_m is not None:
-        return branch.track_distance_m
+        return branch.track_distance_m, MEASURED_DISTANCE_TOLERANCE_M
     # Repli sans géométrie OSM : distance à vol d'oiseau corrigée de la sinuosité.
-    return haversine_m(anchor, site.position) * site.profile.sinuosity
+    estimated = haversine_m(anchor, site.position) * site.profile.sinuosity
+    return estimated, estimated * ESTIMATED_DISTANCE_REL_TOLERANCE
 
 
 def _neighbour_segments(
@@ -358,9 +386,11 @@ def predict_passages(
                 continue
 
             profile = site.profile_for(branch, category)
-            distance = _distance_to_observer_m(site, branch, anchor)
+            distance, distance_tolerance = _distance_to_observer_m(site, branch, anchor)
             travel = travel_time_s(distance, regime, profile)
-            uncertainty = travel_time_uncertainty_s(distance, regime, profile)
+            uncertainty = travel_time_uncertainty_s(
+                distance, regime, profile, distance_uncertainty_m=distance_tolerance
+            )
             speed = speed_at_point_ms(distance, regime, profile) * 3.6
 
             anchor_time = service_datetime(day, reference_s, feed.timezone)

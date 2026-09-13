@@ -354,3 +354,51 @@ def test_the_watch_description_leads_with_the_time_to_be_ready(feed, site):
     assert text.startswith("guetter dès")
     assert passage.announce_at.strftime("%H:%M:%S") in text
     assert passage.when.strftime("%H:%M:%S") in text
+
+
+# -- honnêteté sur l'origine de la distance ----------------------------------
+
+
+def _site_with_distance(track_distance_m):
+    return Site(
+        name="test",
+        position=OBSERVER,
+        anchor_station="Toulouse Matabiau",
+        anchor_position=MATABIAU,
+        branches=(Branch("se", "sud-est", bearing_deg=137.5, track_distance_m=track_distance_m),),
+        profile=TractionProfile(accel_ms2=0.5, decel_ms2=0.6, line_speed_kmh=90.0),
+    )
+
+
+def test_a_branch_knows_whether_its_distance_was_measured():
+    assert Branch("a", "a", bearing_deg=0.0, track_distance_m=1600.0).is_distance_measured
+    assert not Branch("a", "a", bearing_deg=0.0).is_distance_measured
+
+
+def test_an_estimated_distance_widens_the_announced_window(feed):
+    # 1611 m = la distance que le repli déduit du vol d'oiseau (1534 m × 1.05).
+    measured = by_trip(predict_passages(feed, _site_with_distance(1611.0), WEEKDAY))["T:SE:1"][0]
+    estimated = by_trip(predict_passages(feed, _site_with_distance(None), WEEKDAY))["T:SE:1"][0]
+
+    # Les deux distances sont quasi identiques : seule la confiance diffère.
+    assert abs((estimated.when - measured.when).total_seconds()) < 5
+    assert estimated.uncertainty_s > measured.uncertainty_s
+
+
+def test_an_estimated_distance_is_flagged_in_the_output(feed):
+    measured = by_trip(predict_passages(feed, _site_with_distance(1611.0), WEEKDAY))["T:SE:1"][0]
+    estimated = by_trip(predict_passages(feed, _site_with_distance(None), WEEKDAY))["T:SE:1"][0]
+
+    assert measured.margin_marker == "±"
+    assert estimated.margin_marker == "±~"
+    assert "±~" in estimated.describe()
+    assert "±~" in estimated.describe_watch()
+    assert "±~" not in measured.describe()
+
+
+def test_the_measured_site_configuration_announces_a_plain_margin(feed, site):
+    # Les branches du site de référence portent des distances mesurées : aucune
+    # prédiction ne doit être marquée comme estimée.
+    for passage in predict_passages(feed, site, WEEKDAY):
+        if passage.branch.is_distance_measured:
+            assert passage.margin_marker == "±"
