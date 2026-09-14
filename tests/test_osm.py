@@ -486,8 +486,15 @@ def test_geojson_names_the_osm_way_behind_each_segment():
     # Près d'une gare, savoir si un tronçon à 30 km/h est une ligne principale
     # ou une voie de service change entièrement la lecture du profil.
     corridor, ways, anchor = _profiled_corridor()
-    features = to_geojson([corridor], ways, POINT, anchor)
+    features = to_geojson([corridor], ways, POINT, anchor)["features"]
     segments = [f["properties"] for f in features if "maxspeed_kmh" in f["properties"]]
 
     assert segments
     assert all(p.get("voie") for p in segments)
+
+
+def test_a_segment_describes_which_way_it_came_from():
+    segment = SpeedSegment(0.0, 300.0, 30.0, False, False, "Ligne de Toulouse à Bayonne")
+    described = segment.describe()
+    assert "30 km/h" in described
+    assert "Ligne de Toulouse à Bayonne" in described

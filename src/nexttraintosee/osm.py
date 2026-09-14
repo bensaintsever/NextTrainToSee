@@ -142,9 +142,11 @@ class SpeedSegment:
     def describe(self) -> str:
         speed = f"{self.maxspeed_kmh:.0f} km/h" if self.maxspeed_kmh else "vitesse non cartographiée"
         traits = "".join(t for t, on in ((" · tunnel", self.tunnel), (" · pont", self.bridge)) if on)
+        # Le nom du tronçon est ce qui distingue une ligne principale d'une voie
+        # de service : sans lui, un 30 km/h près d'une gare est illisible.
         return (
             f"{self.start_m:6.0f} → {self.end_m:6.0f} m  "
-            f"({self.length_m:4.0f} m)  {speed}{traits}"
+            f"({self.length_m:4.0f} m)  {speed:26s}{traits}  {self.label}"
         )
 
 
