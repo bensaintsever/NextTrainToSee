@@ -431,3 +431,28 @@ def test_health_publishes_the_running_version(service: PassageService):
     from nexttraintosee import __version__
 
     assert service.health_response()["version"] == __version__
+
+
+def test_an_undesignated_report_is_still_recorded_when_ambiguous(
+    service: PassageService, monkeypatch: pytest.MonkeyPatch
+):
+    # Le bouton de l'application n'ose plus désigner : depuis une passerelle,
+    # deux trains semblables à quelques minutes d'écart sont indiscernables.
+    # L'observation doit néanmoins être conservée — elle dit qu'un train est
+    # passé, ce qui reste vrai même sans savoir lequel.
+    service.refresh(now=MORNING)
+    predicted = sorted(
+        predict_passages(service.feed, service.config.site, MORNING.date()),
+        key=lambda p: p.when,
+    )
+    middle = predicted[0].when + (predicted[1].when - predicted[0].when) / 2
+    monkeypatch.setattr("nexttraintosee.service.DEFAULT_OBSERVE_TOLERANCE_S", 900.0)
+
+    result = service.observe(
+        {"seen": True, "observed_at": middle.isoformat(), "source": "app:bouton"}
+    )
+
+    assert result["recorded"] is True      # conservée
+    assert result["ambiguous"] is True     # mais non rattachée
+    assert result["bound_to"] is None
+    assert result["id"] is not None        # et annulable

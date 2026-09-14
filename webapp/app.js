@@ -453,12 +453,14 @@ async function undoObservation(id) {
 //    immédiat, seen=true, observed_at=maintenant, precision_s=3.
 async function onSeenClick() {
   const observedAt = new Date();
-  // Le passage suivi est celui que l'écran annonce au moment de l'appui : c'est
-  // lui que l'observateur confirme. Le transmettre évite au serveur de deviner
-  // par l'heure, ce qui le trompait dès que deux trains se suivaient de près.
+  // Volontairement SANS désignation. Depuis la passerelle, deux trains de même
+  // type et de même sens à quelques minutes d'intervalle sont indiscernables :
+  // l'appui dit honnêtement « un train vient de passer », pas « c'est celui
+  // que l'écran annonce ». Le serveur, qui voit tous les passages, est seul en
+  // mesure de juger si l'attribution est sûre — et refuse quand elle ne l'est
+  // pas, ce qui vaut mieux qu'un rattachement confiant et faux.
   const body = { seen: true, observed_at: toIsoLocal(observedAt), precision_s: 3,
                  source: 'app:bouton' };
-  if (trackedTop) body.trip_id = trackedTop.trip_id;
 
   // Un appui manuel règle d'office le passage actuellement suivi : plus
   // question de le redemander via la carte différée.
@@ -468,12 +470,16 @@ async function onSeenClick() {
   try {
     const res = await postObserve(body);
     const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
+    // L'observation est enregistrée dans tous les cas : ce qui varie, c'est
+    // qu'on sache ou non à quelle circulation la rattacher. Le message le dit,
+    // et nomme le train retenu pour qu'un rattachement douteux se voie.
     if (res.ambiguous) {
-      showToast('⚠️ Passage ambigu : non enregistré', undo);
+      showToast('✓ Noté — deux trains trop proches pour trancher', undo);
     } else if (res.recorded && res.bound_to) {
-      showToast(`✓ Passage de ${fmtHM(res.bound_to.when)} enregistré`, undo);
+      const nom = res.bound_to.headsign ? ` ${res.bound_to.headsign}` : '';
+      showToast(`✓ Noté : ${fmtHM(res.bound_to.when)}${nom}`, undo);
     } else {
-      showToast('✓ Passage enregistré', undo);
+      showToast('✓ Noté — aucun passage annoncé à cette heure', undo);
     }
   } catch (err) {
     showToast('📡 Hors-ligne : passage non envoyé');
