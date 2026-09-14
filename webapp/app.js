@@ -453,7 +453,12 @@ async function undoObservation(id) {
 //    immédiat, seen=true, observed_at=maintenant, precision_s=3.
 async function onSeenClick() {
   const observedAt = new Date();
-  const body = { seen: true, observed_at: toIsoLocal(observedAt), precision_s: 3, source: 'app' };
+  // Le passage suivi est celui que l'écran annonce au moment de l'appui : c'est
+  // lui que l'observateur confirme. Le transmettre évite au serveur de deviner
+  // par l'heure, ce qui le trompait dès que deux trains se suivaient de près.
+  const body = { seen: true, observed_at: toIsoLocal(observedAt), precision_s: 3,
+                 source: 'app:bouton' };
+  if (trackedTop) body.trip_id = trackedTop.trip_id;
 
   // Un appui manuel règle d'office le passage actuellement suivi : plus
   // question de le redemander via la carte différée.
@@ -524,7 +529,8 @@ async function onConfirmYes() {
   hideConfirmCard();
   try {
     const res = await postObserve({
-      seen: true, observed_at: p.when, precision_s: 60, source: 'app',
+      seen: true, observed_at: p.when, precision_s: 60, source: 'app:confirmation',
+      trip_id: p.trip_id,
     });
     const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
     showToast(res.recorded ? '✓ Merci, c\'est noté' : '✓ Réponse envoyée', undo);
@@ -569,7 +575,8 @@ async function onManualSubmit() {
   closeSheet(manualSheetEl, manualBackdropEl);
   try {
     const res = await postObserve({
-      seen: true, observed_at: toIsoLocal(observed), precision_s: 30, source: 'app',
+      seen: true, observed_at: toIsoLocal(observed), precision_s: 30,
+      source: 'app:heure-saisie', trip_id: p.trip_id,
     });
     const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
     showToast(res.recorded ? '✓ Heure enregistrée' : '✓ Réponse envoyée', undo);

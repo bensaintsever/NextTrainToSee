@@ -399,3 +399,26 @@ def test_without_a_designation_the_behaviour_is_unchanged(service: PassageServic
 
     assert result["binding_method"] == "nearest"
     assert result["bound_to"]["trip_id"] == predicted[0]["trip_id"]
+
+
+def test_the_app_sources_are_distinguished_when_binding(service: PassageService):
+    # L'application a trois façons de rapporter un passage, de qualités très
+    # différentes : un appui au moment où le train passe, une confirmation
+    # différée, une heure saisie après coup. Le champ `source` doit les séparer,
+    # faute de quoi le recalage les traite comme équivalentes.
+    service.refresh(now=MORNING)
+    predicted = sorted(
+        service.next_response(now=MORNING, limit=10)["passages"], key=lambda p: p["when"]
+    )[0]
+
+    for source in ("app:bouton", "app:confirmation", "app:heure-saisie"):
+        result = service.observe(
+            {
+                "seen": True,
+                "observed_at": predicted["when"],
+                "trip_id": predicted["trip_id"],
+                "source": source,
+            }
+        )
+        assert result["binding_method"] == "designated"
+        assert result["bound_to"]["trip_id"] == predicted["trip_id"]
