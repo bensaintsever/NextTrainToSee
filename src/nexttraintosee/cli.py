@@ -17,7 +17,14 @@ from .coverage import analyse, summarise_delays
 from .geo import bearing_distance_deg, initial_bearing_deg
 from .gtfs import GtfsError, GtfsFeed
 from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_observations, runs_from_matches
-from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops, speed_profile
+from .osm import (
+    OverpassClient,
+    OverpassError,
+    build_corridors,
+    merged_length_m,
+    nearest_stops,
+    speed_profile,
+)
 from .predict import Passage, next_passages, predict_passages, service_days_around
 from .report import csv_rows, french_date, hourly_histogram, render_histogram
 from .realtime import RealtimeError, empty_snapshot, load_snapshot
@@ -282,11 +289,13 @@ def cmd_tracks(args: argparse.Namespace) -> int:
                 print(f"  {segment.describe()}")
             restricted = [s for s in segments if s.maxspeed_kmh and s.maxspeed_kmh < 80]
             if restricted:
-                total = sum(s.length_m for s in restricted)
+                # Longueur fusionnée : deux tronçons qui se recouvrent ne
+                # couvrent pas deux fois la même voie.
+                covered = merged_length_m(restricted)
                 print(
-                    f"\n  {len(restricted)} tronçon(s) sous 80 km/h, {total:.0f} m au total : "
-                    "une restriction locale, que le modèle\n  ne sait pas représenter — il "
-                    "n'applique qu'une vitesse par branche."
+                    f"\n  Sous 80 km/h sur {covered:.0f} m des {segments[-1].end_m:.0f} m "
+                    "du parcours : une restriction locale,\n  que le modèle ne sait pas "
+                    "représenter — il n'applique qu'une vitesse par branche."
                 )
             print()
 

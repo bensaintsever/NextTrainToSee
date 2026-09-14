@@ -8,6 +8,8 @@ from nexttraintosee.osm import (
     build_corridors,
     build_query,
     nearest_stops,
+    SpeedSegment,
+    merged_length_m,
     parse_overpass,
     speed_profile,
     stitch_ways,
@@ -324,3 +326,49 @@ def test_speed_profile_reports_an_unmapped_speed_rather_than_guessing():
     corridor = build_corridors(ways, POINT)[0]
 
     assert speed_profile(corridor, ways, anchor)[0].maxspeed_kmh is None
+
+
+def test_speed_profile_counts_from_the_station_whichever_way_the_line_was_stitched():
+    # Régression : la polyligne peut être reconstituée du point vers la gare.
+    # Les abscisses doivent rester comptées depuis la gare, sinon le profil se
+    # lit à l'envers — l'avant-gare apparaît près du point d'observation.
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    south = from_local_xy(POINT, (0.0, -600.0))
+    # Géométrie tracée du SUD vers le NORD : la gare est à l'abscisse haute.
+    near_point = _way(1, (south, from_local_xy(POINT, (0.0, 400.0))), maxspeed="120")
+    near_station = _way(2, (near_point.geometry[-1], anchor), maxspeed="30")
+    corridor = build_corridors([near_point, near_station], POINT)[0]
+
+    segments = speed_profile(corridor, [near_point, near_station], anchor)
+
+    # Le 30 km/h de l'avant-gare doit sortir en premier, collé à l'origine.
+    assert segments[0].maxspeed_kmh == 30.0
+    assert segments[0].start_m == pytest.approx(0.0, abs=2.0)
+    assert segments[-1].end_m == pytest.approx(1564.0, abs=5.0)
+
+
+def test_speed_profile_keeps_only_the_ways_the_centreline_travels():
+    # Dans un avant-gare, des voies parallèles passent à quelques mètres : un
+    # filtre par distance latérale les confondrait toutes.
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    main = _way(1, (anchor, from_local_xy(POINT, (0.0, -500.0))), maxspeed="120")
+    sibling = _way(
+        2,
+        (from_local_xy(POINT, (4.0, 1564.0)), from_local_xy(POINT, (4.0, -500.0))),
+        maxspeed="30",
+    )
+    corridor = build_corridors([main, sibling], POINT, corridor_width_m=60.0)[0]
+
+    assert corridor.segment_count == 2  # les deux voies forment bien un corridor
+    assert [s.maxspeed_kmh for s in speed_profile(corridor, [main, sibling], anchor)] == [120.0]
+
+
+def test_merged_length_does_not_count_overlaps_twice():
+    def seg(start, end):
+        return SpeedSegment(start, end, 30.0, False, False, "x")
+
+    # Quatre voies parallèles décrivant le même avant-gare : 300 m de voie,
+    # pas 1 200. Sans fusion, le total dépassait la longueur du parcours.
+    assert merged_length_m([seg(0, 300)] * 4) == pytest.approx(300.0)
+    assert merged_length_m([seg(0, 100), seg(50, 200), seg(400, 450)]) == pytest.approx(250.0)
+    assert merged_length_m([]) == 0.0

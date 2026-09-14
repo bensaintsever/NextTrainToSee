@@ -204,6 +204,13 @@ class Corridor:
     """Projection du point d'observation sur `centerline`."""
     observer: LatLon = (0.0, 0.0)
     """Point d'observation ayant servi à construire le corridor."""
+    path_way_ids: frozenset[int] = frozenset()
+    """Tronçons OSM effectivement parcourus par `centerline`.
+
+    Indispensable pour relever un profil : à l'approche d'une gare, des dizaines
+    de voies passent à quelques mètres les unes des autres, et un filtre par
+    distance latérale les confond toutes.
+    """
 
     @property
     def segment_count(self) -> int:
@@ -449,11 +456,22 @@ def build_corridors(
         # globalement traverserait la gare et basculerait sur la ligne voisine,
         # puisque toutes y partagent des nœuds.
         group_ids = {w.osm_id for w in group_ways}
-        centerline = max(stitch_ways(group_ways), key=polyline_length_m)
-        centerline = extend_chain(
-            centerline,
-            {w.osm_id: list(w.geometry) for w in usable if w.osm_id not in group_ids},
-        )
+        # On suit la consommation du vivier pour savoir quels tronçons forment
+        # la polyligne, plutôt que de le deviner après coup.
+        inner = {w.osm_id: list(w.geometry) for w in group_ways}
+        seed_id = max(inner, key=lambda i: polyline_length_m(inner[i]))
+        centerline = inner.pop(seed_id)
+        path_ids = {seed_id}
+
+        remaining = set(inner)
+        centerline = extend_chain(centerline, inner)
+        path_ids |= remaining - set(inner)
+
+        outer = {w.osm_id: list(w.geometry) for w in usable if w.osm_id not in group_ids}
+        remaining = set(outer)
+        centerline = extend_chain(centerline, outer)
+        path_ids |= remaining - set(outer)
+
         projection = project_on_polyline(point, centerline)
         # Dans un tronc commun, un même faisceau porte des voies de plusieurs
         # lignes : les nommer toutes est plus juste que de retenir la première
@@ -473,6 +491,7 @@ def build_corridors(
                 centerline=tuple(centerline),
                 projection=projection,
                 observer=point,
+                path_way_ids=frozenset(path_ids),
             )
         )
 
@@ -480,54 +499,68 @@ def build_corridors(
     return corridors
 
 
+def merged_length_m(segments: Sequence[SpeedSegment]) -> float:
+    """Longueur couverte par des tronçons, sans compter deux fois ce qui se recouvre."""
+    spans = sorted((s.start_m, s.end_m) for s in segments)
+    total, current_end = 0.0, float("-inf")
+    for start, end in spans:
+        start = max(start, current_end)
+        if end > start:
+            total += end - start
+            current_end = end
+    return total
+
+
 def speed_profile(
     corridor: "Corridor",
     ways: Sequence[RailWay],
     anchor: LatLon,
-    lateral_tolerance_m: float = 25.0,
 ) -> list[SpeedSegment]:
     """Relevé des vitesses et ouvrages le long du parcours gare -> point.
 
-    Le modèle de marche ne connaît qu'une vitesse par branche, alors que la
-    voie en change plusieurs fois : une restriction de tunnel, une courbe, un
-    appareil de voie. Ce relevé montre où elles tombent, ce qu'un panneau vu
-    depuis une passerelle ne dit pas — un panneau indique une limite, pas
-    l'étendue sur laquelle elle s'applique.
+    Le modèle de marche ne connaît qu'une vitesse par branche, alors que la voie
+    en change plusieurs fois : une restriction de tunnel, une courbe, les
+    appareils de voie d'un avant-gare. Ce relevé montre où elles tombent, ce
+    qu'un panneau vu depuis une passerelle ne dit pas — un panneau donne une
+    limite, pas l'étendue sur laquelle elle porte.
+
+    Les abscisses sont comptées **depuis la gare d'appui**, quel que soit le
+    sens dans lequel la polyligne a été reconstituée.
 
     Args:
         corridor: corridor dont la polyligne sert de référence.
-        ways: tous les tronçons récupérés, pas seulement ceux du corridor.
+        ways: tous les tronçons récupérés ; seuls ceux que la polyligne
+            emprunte réellement sont retenus.
         anchor: position de la gare d'appui.
-        lateral_tolerance_m: écart maximal pour considérer qu'un tronçon est
-            bien celui que suit la polyligne, et non une voie parallèle.
 
     Returns:
-        Les tronçons rencontrés entre la gare et le point, du plus proche de la
-        gare au plus proche du point.
+        Les tronçons rencontrés entre la gare et le point, dans cet ordre.
     """
     centerline = list(corridor.centerline)
     anchor_along = project_on_polyline(anchor, centerline).along_m
     observer_along = corridor.projection.along_m
-    low, high = sorted((anchor_along, observer_along))
+    # Sens de parcours : la gare est l'origine, le point l'extrémité.
+    forward = 1.0 if observer_along >= anchor_along else -1.0
+    total = abs(observer_along - anchor_along)
+
+    def from_anchor(along: float) -> float:
+        return (along - anchor_along) * forward
 
     segments: list[SpeedSegment] = []
     for way in ways:
-        if way.tags.get("railway") not in MAIN_RAILWAY_VALUES:
+        if way.osm_id not in corridor.path_way_ids:
             continue
-        middle = way.geometry[len(way.geometry) // 2]
-        if project_on_polyline(middle, centerline).distance_m > lateral_tolerance_m:
-            continue  # voie parallèle, pas le parcours suivi
         ends = sorted(
-            project_on_polyline(point, centerline).along_m
+            from_anchor(project_on_polyline(point, centerline).along_m)
             for point in (way.geometry[0], way.geometry[-1])
         )
-        start, end = max(ends[0], low), min(ends[1], high)
+        start, end = max(ends[0], 0.0), min(ends[1], total)
         if end - start < 1.0:
             continue
         segments.append(
             SpeedSegment(
-                start_m=start - low,
-                end_m=end - low,
+                start_m=start,
+                end_m=end,
                 maxspeed_kmh=way.maxspeed_kmh,
                 tunnel=way.tags.get("tunnel") not in (None, "no"),
                 bridge=way.tags.get("bridge") not in (None, "no"),
