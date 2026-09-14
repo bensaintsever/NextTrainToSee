@@ -319,9 +319,13 @@ def cmd_next(args: argparse.Namespace) -> int:
         if args.watch:
             countdown = (passage.announce_at - now).total_seconds() / 60
             print(f"  dans {countdown:5.1f} min  {passage.describe_watch()}")
+            if args.ids:
+                print(f"{'':20s}{passage.trip_id}")
         else:
             countdown = (passage.when - now).total_seconds() / 60
             print(f"  dans {countdown:5.1f} min  {passage.describe()}")
+            if args.ids:
+                print(f"{'':20s}{passage.trip_id}")
 
     if args.record:
         with Store(config.data.database) as store:
@@ -979,6 +983,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-realtime", action="store_true", help="horaires théoriques seulement"
     )
     upcoming.add_argument("--record", action="store_true", help="journaliser les prédictions")
+    upcoming.add_argument(
+        "--ids", action="store_true",
+        help="afficher l'identifiant de chaque circulation, à passer à `observe --trip-id`",
+    )
     upcoming.add_argument(
         "--watch",
         action="store_true",

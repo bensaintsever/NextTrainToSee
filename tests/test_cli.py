@@ -796,3 +796,18 @@ def test_forgetting_an_unknown_observation_fails_clearly(config_path, capsys):
 
     assert run(config_path, "forget", "9999") == 1
     assert "Aucune observation" in capsys.readouterr().err
+
+
+def test_next_can_print_the_identifiers_needed_to_designate(config_path, capsys):
+    # Sans cela, `observe --trip-id` est inutilisable : l'identifiant n'apparaît
+    # nulle part dans la sortie normale.
+    assert run(
+        config_path, "next", "--no-realtime", "--at", MORNING.isoformat(), "--ids"
+    ) == 0
+    with_ids = capsys.readouterr().out
+
+    assert run(config_path, "next", "--no-realtime", "--at", MORNING.isoformat()) == 0
+    without = capsys.readouterr().out
+
+    assert "T:SE:1" in with_ids
+    assert "T:SE:1" not in without
