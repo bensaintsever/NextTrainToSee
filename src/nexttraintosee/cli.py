@@ -26,7 +26,7 @@ from .sensor.replay import read_levels
 from .sensor.session import Status, listen_session
 from .observation import Observation, ObservationKind, from_detection
 from .server import DEFAULT_WEBAPP_DIR, create_server
-from .service import PassageService, bind_passage
+from .service import PassageService, resolve_binding
 from .store import Store
 from .validate import category_coverage, check_segments, format_duration
 
@@ -434,13 +434,17 @@ def cmd_observe(args: argparse.Namespace) -> int:
     moment = _resolve_time(args.time)
 
     with Store(config.data.database) as store:
-        window = timedelta(seconds=args.tolerance)
-        candidates = store.passages_between(
-            config.site.name, moment - window, moment + window, config.site.branches
+        # Même règle que celle qu'expose le serveur HTTP sur `POST /api/observe`
+        # (module partagé `service`) : désignation si elle est fournie, sinon
+        # rattachement au passage prédit le plus proche.
+        binding = resolve_binding(
+            store, config.site, moment, args.tolerance, trip_id=args.trip_id
         )
-        # Rattachement au passage prédit le plus proche : même règle qu'expose
-        # le serveur HTTP sur `POST /api/observe` (module partagé `service`).
-        binding = bind_passage(candidates, moment, args.tolerance)
+        if args.trip_id and binding.passage is None:
+            print(
+                f"⚠ aucune circulation « {args.trip_id} » prédite à moins de 30 min : "
+                "vérifiez l'identifiant, ou lancez d'abord `next --record`."
+            )
         if binding.ambiguous:
             first, second = binding.candidates[0], binding.candidates[1]
             print(
@@ -460,15 +464,21 @@ def cmd_observe(args: argparse.Namespace) -> int:
             precision_s=args.precision,
             note=args.note,
         )
-        store.record_observation(config.site.name, observation)
+        observation_id = store.record_observation(config.site.name, observation)
 
-    print(f"Enregistré : {observation.describe()}")
+    # L'identifiant est imprimé pour que l'observation reste rétractable : une
+    # observation mal rattachée fausse le recalage plus sûrement qu'une
+    # observation manquante.
+    print(f"Enregistré (n° {observation_id}) : {observation.describe()}")
     if bound is not None:
         gap = (moment - bound.when).total_seconds()
+        comment = "désigné" if binding.method == "designated" else "le plus proche dans le temps"
         print(
             f"  rattaché à {bound.route_label} {bound.headsign} "
-            f"prédit à {bound.when:%H:%M:%S} — écart {gap:+.0f} s"
+            f"prédit à {bound.when:%H:%M:%S} — écart {gap:+.0f} s ({comment})"
         )
+        if binding.method == "nearest":
+            print(f"  si ce n'est pas le bon : nexttraintosee forget {observation_id}")
     elif not args.not_seen:
         print("  aucun passage prédit à portée : observation conservée telle quelle.")
     return 0
@@ -806,6 +816,22 @@ def cmd_coverage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forget(args: argparse.Namespace) -> int:
+    """Efface une observation — typiquement une qui s'est liée au mauvais train."""
+    config = _load(args)
+    with Store(config.data.database) as store:
+        removed = store.delete_observation(config.site.name, args.observation_id)
+
+    if removed:
+        print(f"Observation n° {args.observation_id} effacée.")
+        return 0
+    print(
+        f"Aucune observation n° {args.observation_id} pour ce site.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Vérifie ce qui est disponible dans l'environnement."""
     config = _load(args)
@@ -1046,10 +1072,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     observing.add_argument("--note", default="", help="remarque libre")
     observing.add_argument(
+        "--trip-id", default=None,
+        help="désigner la circulation vue, au lieu de la deviner par l'heure "
+             "(identifiant affiché par `next`)",
+    )
+    observing.add_argument(
         "--tolerance", type=float, default=180.0,
-        help="écart maximal pour rattacher l'observation à un passage prédit",
+        help="écart maximal pour rattacher l'observation à un passage prédit "
+             "quand aucune circulation n'est désignée",
     )
     observing.set_defaults(func=cmd_observe)
+
+    forgetting = subparsers.add_parser(
+        "forget", help="effacer une observation mal rattachée"
+    )
+    forgetting.add_argument(
+        "observation_id", type=int, help="numéro affiché par `observe`"
+    )
+    forgetting.set_defaults(func=cmd_forget)
 
     doctor = subparsers.add_parser("doctor", help="vérifier l'environnement")
     doctor.set_defaults(func=cmd_doctor)

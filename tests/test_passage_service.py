@@ -332,3 +332,70 @@ def test_starting_twice_does_not_spawn_a_second_thread(config: AppConfig):
         assert service._thread is first_thread
     finally:
         service.stop()
+
+
+# -- désignation de la circulation par l'observateur --------------------------
+
+
+def test_designating_a_trip_binds_to_it_even_if_another_is_nearer(service: PassageService):
+    # Le cœur du problème vécu sur le terrain : deux trains rapprochés, une
+    # prédiction décalée, et l'observateur qui sait lequel il a vu. Sa
+    # désignation doit l'emporter sur la proximité temporelle.
+    service.refresh(now=MORNING)
+    predicted = sorted(
+        service.next_response(now=MORNING, limit=10)["passages"], key=lambda p: p["when"]
+    )
+    wanted, nearer = predicted[1], predicted[0]
+    observed_at = datetime.fromisoformat(nearer["when"]) + timedelta(seconds=5)
+
+    result = service.observe(
+        {"seen": True, "observed_at": observed_at.isoformat(), "trip_id": wanted["trip_id"]}
+    )
+
+    assert result["binding_method"] == "designated"
+    assert result["bound_to"]["trip_id"] == wanted["trip_id"]
+    assert result["ambiguous"] is False
+
+
+def test_designation_measures_a_gap_far_beyond_the_usual_tolerance(service: PassageService):
+    # Sans désignation, un écart supérieur à la tolérance est invisible : le
+    # rattachement par l'heure ne peut par construction mesurer que de petits
+    # écarts, ce qui flatte la calibration.
+    service.refresh(now=MORNING)
+    predicted = sorted(
+        service.next_response(now=MORNING, limit=10)["passages"], key=lambda p: p["when"]
+    )
+    target = predicted[0]
+    far_off = datetime.fromisoformat(target["when"]) + timedelta(seconds=600)
+
+    result = service.observe(
+        {"seen": True, "observed_at": far_off.isoformat(), "trip_id": target["trip_id"]}
+    )
+
+    assert result["bound_to"]["trip_id"] == target["trip_id"]
+    assert result["gap_s"] == pytest.approx(600.0, abs=1.0)
+
+
+def test_an_unknown_designation_leaves_the_observation_unbound(service: PassageService):
+    service.refresh(now=MORNING)
+    result = service.observe(
+        {"seen": True, "observed_at": MORNING.isoformat(), "trip_id": "T:INEXISTANT"}
+    )
+
+    assert result["recorded"] is True
+    assert result["bound_to"] is None
+    assert result["binding_method"] == "none"
+    assert result["ambiguous"] is False
+
+
+def test_without_a_designation_the_behaviour_is_unchanged(service: PassageService):
+    service.refresh(now=MORNING)
+    predicted = sorted(
+        service.next_response(now=MORNING, limit=10)["passages"], key=lambda p: p["when"]
+    )
+    observed_at = datetime.fromisoformat(predicted[0]["when"]) + timedelta(seconds=12)
+
+    result = service.observe({"seen": True, "observed_at": observed_at.isoformat()})
+
+    assert result["binding_method"] == "nearest"
+    assert result["bound_to"]["trip_id"] == predicted[0]["trip_id"]

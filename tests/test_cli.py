@@ -706,3 +706,93 @@ def test_mdns_hostname_does_not_double_the_suffix(monkeypatch):
 
     monkeypatch.setattr(socket, "gethostname", lambda: "MacBook-Air-de-Benjamin.local")
     assert _mdns_hostname() == "MacBook-Air-de-Benjamin.local"
+
+
+# -- désignation et rétractation d'une observation ---------------------------
+
+
+def _record_predictions(config_path: Path) -> None:
+    assert run(
+        config_path, "next", "--no-realtime", "--at", MORNING.isoformat(),
+        "--horizon", "600", "--record",
+    ) == 0
+
+
+def test_observe_prints_a_reclaimable_identifier(config_path, capsys):
+    _record_predictions(config_path)
+    capsys.readouterr()
+
+    assert run(config_path, "observe", MORNING.isoformat(), "--precision", "30") == 0
+    out = capsys.readouterr().out
+    assert "Enregistré (n°" in out
+
+
+def test_a_time_bound_observation_offers_the_way_out(config_path, capsys):
+    # Le rattachement par l'heure peut se tromper sans le savoir : il doit dire
+    # comment revenir en arrière.
+    _record_predictions(config_path)
+    capsys.readouterr()
+
+    from nexttraintosee.config import load_config
+    from nexttraintosee.gtfs import GtfsFeed
+    from nexttraintosee.predict import predict_passages
+
+    config = load_config(config_path)
+    feed = GtfsFeed.load(config.data.gtfs_path, anchor_name="Toulouse Matabiau")
+    first = sorted(predict_passages(feed, config.site, MORNING.date()), key=lambda p: p.when)[0]
+
+    assert run(config_path, "observe", first.when.isoformat(), "--precision", "5") == 0
+    out = capsys.readouterr().out
+    assert "le plus proche dans le temps" in out
+    assert "nexttraintosee forget" in out
+
+
+def test_designating_a_trip_is_reported_as_such(config_path, capsys):
+    _record_predictions(config_path)
+    capsys.readouterr()
+
+    from nexttraintosee.config import load_config
+    from nexttraintosee.gtfs import GtfsFeed
+    from nexttraintosee.predict import predict_passages
+
+    config = load_config(config_path)
+    feed = GtfsFeed.load(config.data.gtfs_path, anchor_name="Toulouse Matabiau")
+    passages = sorted(predict_passages(feed, config.site, MORNING.date()), key=lambda p: p.when)
+    wanted, other = passages[1], passages[0]
+
+    # On observe à l'heure du PREMIER passage, mais on désigne le SECOND.
+    assert run(
+        config_path, "observe", other.when.isoformat(),
+        "--trip-id", wanted.trip_id, "--precision", "30",
+    ) == 0
+    out = capsys.readouterr().out
+    assert "(désigné)" in out
+    assert wanted.headsign in out
+
+
+def test_an_unknown_designation_is_signalled(config_path, capsys):
+    _record_predictions(config_path)
+    capsys.readouterr()
+
+    assert run(
+        config_path, "observe", MORNING.isoformat(), "--trip-id", "T:INEXISTANT"
+    ) == 0
+    assert "aucune circulation" in capsys.readouterr().out
+
+
+def test_forget_removes_an_observation(config_path, capsys):
+    _record_predictions(config_path)
+    assert run(config_path, "observe", MORNING.isoformat(), "--precision", "30") == 0
+    out = capsys.readouterr().out
+    observation_id = int(out.split("Enregistré (n°")[1].split(")")[0])
+
+    assert run(config_path, "forget", str(observation_id)) == 0
+    assert "effacée" in capsys.readouterr().out
+
+
+def test_forgetting_an_unknown_observation_fails_clearly(config_path, capsys):
+    _record_predictions(config_path)
+    capsys.readouterr()
+
+    assert run(config_path, "forget", "9999") == 1
+    assert "Aucune observation" in capsys.readouterr().err

@@ -44,6 +44,11 @@ GTFS_DOWNLOAD_URL = "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenDa
 #: identique à celle de la commande `observe`.
 DEFAULT_OBSERVE_TOLERANCE_S = 180.0
 
+#: Fenêtre de recherche quand l'observateur désigne lui-même la circulation.
+#: Large à dessein : la désignation fait autorité, et c'est justement quand la
+#: prédiction est très fausse que l'écart mesuré vaut le plus cher.
+DESIGNATED_SEARCH_WINDOW_S = 1800.0
+
 #: Libellés de direction et indication d'où regarder, figés par le contrat
 #: (§ 5 de `docs/app-v0.md`) : le client ne les infère pas, le serveur les donne.
 _DIRECTION_LABELS = {
@@ -90,6 +95,8 @@ class PassageBinding:
     """Vrai si deux candidats étaient à portée comparable."""
     candidates: tuple[Passage, ...] = ()
     """Candidats triés par proximité temporelle croissante (pour diagnostic)."""
+    method: str = "none"
+    """Comment le rattachement a été obtenu : « designated », « nearest » ou « none »."""
 
 
 def bind_passage(
@@ -103,7 +110,7 @@ def bind_passage(
     le second candidat est inférieur à la moitié de la tolérance.
     """
     if not candidates:
-        return PassageBinding(None, False, ())
+        return PassageBinding(None, False, (), "none")
 
     ordered = tuple(sorted(candidates, key=lambda p: abs((p.when - moment).total_seconds())))
     nearest = ordered[0]
@@ -111,8 +118,57 @@ def bind_passage(
         first_gap = abs((nearest.when - moment).total_seconds())
         second_gap = abs((ordered[1].when - moment).total_seconds())
         if second_gap - first_gap < tolerance_s / 2:
-            return PassageBinding(None, True, ordered)
-    return PassageBinding(nearest, False, ordered)
+            return PassageBinding(None, True, ordered, "none")
+    return PassageBinding(nearest, False, ordered, "nearest")
+
+
+def bind_designated(
+    candidates: Sequence[Passage], trip_id: str, moment: datetime
+) -> PassageBinding:
+    """Rattache l'observation à la circulation que l'observateur a désignée.
+
+    Depuis une passerelle, on ne peut pas lire le numéro de marche d'un train :
+    ce qui est inscrit sur la caisse est le numéro de la rame, que le GTFS
+    ignore. La seule chose qu'un humain puisse faire, c'est montrer la ligne de
+    la liste qui correspond à ce qu'il voit.
+
+    Cette désignation fait autorité : elle ne se discute pas contre une
+    proximité temporelle. C'est ce qui permet de mesurer un écart de plusieurs
+    minutes, là où le rattachement par l'heure, borné par sa tolérance, ne peut
+    par construction observer que de petits écarts.
+    """
+    matches = tuple(p for p in candidates if p.trip_id == trip_id)
+    if not matches:
+        return PassageBinding(None, False, (), "none")
+    # Une circulation peut figurer deux fois — elle arrive, puis elle repart.
+    nearest = min(matches, key=lambda p: abs((p.when - moment).total_seconds()))
+    return PassageBinding(nearest, False, matches, "designated")
+
+
+def resolve_binding(
+    store: Store,
+    site,
+    moment: datetime,
+    tolerance_s: float,
+    trip_id: str | None = None,
+) -> PassageBinding:
+    """Rattache une observation, par désignation si elle est fournie.
+
+    Point d'entrée commun à la ligne de commande et au serveur HTTP, pour que
+    les deux répondent exactement la même chose.
+    """
+    if trip_id:
+        window = timedelta(seconds=DESIGNATED_SEARCH_WINDOW_S)
+        candidates = store.passages_between(
+            site.name, moment - window, moment + window, site.branches
+        )
+        return bind_designated(candidates, trip_id, moment)
+
+    window = timedelta(seconds=tolerance_s)
+    candidates = store.passages_between(
+        site.name, moment - window, moment + window, site.branches
+    )
+    return bind_passage(candidates, moment, tolerance_s)
 
 
 def _passage_payload(passage: Passage) -> dict:
@@ -315,6 +371,8 @@ class PassageService:
             raise ValueError("champ « seen » booléen requis")
         source = str(payload.get("source", "app"))
         precision_s = float(payload.get("precision_s", 5.0))
+        designated = payload.get("trip_id")
+        trip_id = str(designated) if designated else None
 
         if seen:
             moment = _parse_iso(payload.get("observed_at"))
@@ -325,12 +383,14 @@ class PassageService:
             if moment is None:
                 raise ValueError("« anchor » (ISO 8601) requis quand seen=false")
 
-        window = timedelta(seconds=DEFAULT_OBSERVE_TOLERANCE_S)
         with Store(self.config.data.database) as store:
-            candidates = store.passages_between(
-                self.config.site.name, moment - window, moment + window, self.config.site.branches
+            binding = resolve_binding(
+                store,
+                self.config.site,
+                moment,
+                DEFAULT_OBSERVE_TOLERANCE_S,
+                trip_id=trip_id,
             )
-            binding = bind_passage(candidates, moment, DEFAULT_OBSERVE_TOLERANCE_S)
 
             observation = Observation(
                 observed_at=moment if seen else None,
@@ -361,6 +421,7 @@ class PassageService:
             "id": observation_id,
             "bound_to": bound_to,
             "ambiguous": binding.ambiguous,
+            "binding_method": binding.method,
             "gap_s": gap_s,
         }
 
