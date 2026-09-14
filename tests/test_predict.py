@@ -402,3 +402,44 @@ def test_the_measured_site_configuration_announces_a_plain_margin(feed, site):
     for passage in predict_passages(feed, site, WEEKDAY):
         if passage.branch.is_distance_measured:
             assert passage.margin_marker == "±"
+
+
+# -- restriction d'approche, asymétrique par nature ---------------------------
+
+
+def _site_with_approach(approach_speed_kmh):
+    return Site(
+        name="test",
+        position=OBSERVER,
+        anchor_station="Toulouse Matabiau",
+        anchor_position=MATABIAU,
+        branches=(
+            Branch(
+                "se", "sud-est", bearing_deg=137.5, track_distance_m=1564.0,
+                line_speed_kmh=113.0, approach_speed_kmh=approach_speed_kmh,
+            ),
+        ),
+        profile=TractionProfile(accel_ms2=0.5, decel_ms2=0.6, line_speed_kmh=113.0),
+    )
+
+
+def test_an_approach_restriction_delays_arrivals_only(feed):
+    libre = by_trip(predict_passages(feed, _site_with_approach(None), WEEKDAY))
+    bride = by_trip(predict_passages(feed, _site_with_approach(60.0), WEEKDAY))
+
+    # T:SE:2 arrive à Matabiau : il passe devant le point plus tôt, puisqu'il
+    # met plus longtemps à rejoindre la gare.
+    arrivee_libre = libre["T:SE:2"][0]
+    arrivee_bride = bride["T:SE:2"][0]
+    assert arrivee_bride.when < arrivee_libre.when
+
+    # T:SE:1 quitte Matabiau : la restriction d'approche ne le concerne pas.
+    assert bride["T:SE:1"][0].when == libre["T:SE:1"][0].when
+
+
+def test_an_approach_restriction_never_speeds_a_train_up(feed):
+    # Une valeur supérieure à la vitesse de ligne est un plafond inopérant,
+    # pas un relèvement.
+    reference = by_trip(predict_passages(feed, _site_with_approach(None), WEEKDAY))
+    haute = by_trip(predict_passages(feed, _site_with_approach(200.0), WEEKDAY))
+    assert haute["T:SE:2"][0].when == reference["T:SE:2"][0].when

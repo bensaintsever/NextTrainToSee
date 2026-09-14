@@ -79,6 +79,14 @@ class Branch:
     """Distance curviligne gare d'appui -> point, mesurée sur la géométrie OSM."""
     line_speed_kmh: float | None = None
     """Vitesse limite locale, si elle diffère du profil par défaut."""
+    approach_speed_kmh: float | None = None
+    """Plafond de vitesse pour les seuls trains qui *arrivent* à la gare d'appui.
+
+    L'infrastructure n'est pas symétrique : une restriction d'approche
+    s'applique aux trains qui entrent en gare, pas à ceux qui en sortent, alors
+    que `line_speed_kmh` vaut pour les deux sens. Laissé vide, le régime
+    « arrivée » utilise la vitesse de ligne ordinaire.
+    """
     corridor_id: str | None = None
     """Corridor OSM correspondant, à titre de traçabilité."""
 
@@ -386,6 +394,13 @@ def predict_passages(
                 continue
 
             profile = site.profile_for(branch, category)
+            if regime is Regime.ARRIVING and branch.approach_speed_kmh is not None:
+                # Plafond, jamais relèvement : une restriction d'approche ne
+                # peut que ralentir le train.
+                profile = replace(
+                    profile,
+                    line_speed_kmh=min(profile.line_speed_kmh, branch.approach_speed_kmh),
+                )
             distance, distance_tolerance = _distance_to_observer_m(site, branch, anchor)
             travel = travel_time_s(distance, regime, profile)
             uncertainty = travel_time_uncertainty_s(

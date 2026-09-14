@@ -203,3 +203,20 @@ def test_the_shipped_configuration_separates_omnibus_from_through_trains():
     # Les trains sans arrêt ne doivent pas hériter de la vitesse des omnibus.
     assert categories["grandes-lignes"].line_speed_kmh == 120.0
     assert categories["ter"].line_speed_kmh is None
+
+
+def test_an_approach_restriction_is_read_when_declared():
+    config = parse(
+        MINIMAL
+        + """
+approach_speed_kmh = 60
+line_speed_kmh = 113
+"""
+    )
+    branch = config.site.branches[0]
+    assert branch.approach_speed_kmh == 60.0
+    assert branch.line_speed_kmh == 113.0
+
+
+def test_a_branch_without_an_approach_restriction_has_none():
+    assert parse(MINIMAL).site.branches[0].approach_speed_kmh is None

@@ -102,6 +102,9 @@ def parse_config(raw: dict[str, Any], base_dir: Path | None = None) -> AppConfig
             line_speed_kmh=(
                 float(table["line_speed_kmh"]) if "line_speed_kmh" in table else None
             ),
+            approach_speed_kmh=(
+                float(table["approach_speed_kmh"]) if "approach_speed_kmh" in table else None
+            ),
             corridor_id=table.get("corridor_id"),
         )
         for table in branch_tables
