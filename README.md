@@ -105,6 +105,17 @@ fonctionne : `nexttraintosee doctor` vous le dira.
 
 ## Utilisation
 
+L'outil est installé dans l'environnement virtuel `.venv`. **Activez-le à chaque
+nouveau terminal**, sinon `nexttraintosee` reste introuvable :
+
+```bash
+cd NextTrainToSee
+source .venv/bin/activate
+```
+
+Pour une commande isolée, `./.venv/bin/nexttraintosee …` fonctionne sans rien
+activer. Les scripts de `scripts/` s'en chargent eux-mêmes.
+
 ```bash
 # Ce qui est disponible dans votre environnement
 nexttraintosee doctor

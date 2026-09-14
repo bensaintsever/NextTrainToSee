@@ -138,15 +138,31 @@ nexttraintosee -c "$CONFIG" doctor
 
 say "Résolution des voies autour du point (Overpass)"
 if nexttraintosee -c "$CONFIG" tracks; then
-    cat <<'MSG'
-
-▸ À faire maintenant : reportez dans votre configuration
-    - track_distance_m  → la valeur « distance par la voie » affichée ci-dessus
-    - passes_observer   → false pour tout corridor qui ne passe pas devant chez vous
-
-  Puis lancez :  nexttraintosee -c CONFIG next
-MSG
+    echo
+    echo "  Si ces valeurs diffèrent de votre configuration, recopiez le bloc"
+    echo "  [[branches]] affiché ci-dessus."
 else
     warn "Overpass n'a pas répondu. Réessayez plus tard : la géométrie est mise en cache,"
     warn "l'appel n'est nécessaire qu'une fois."
 fi
+
+# --- 6. Comment s'en servir ensuite ------------------------------------------
+#
+# Ce script active l'environnement virtuel pour lui-même ; le shell qui l'a
+# lancé, lui, n'en sait rien. Sans cette explication finale, la commande
+# `nexttraintosee` reste introuvable une fois le script terminé — et c'est
+# exactement ce qui arrive à tout le monde la première fois.
+
+say "Pour utiliser l'outil"
+cat <<MSG
+  Ouvrez une session de travail :
+
+      cd $(pwd)
+      source .venv/bin/activate
+      nexttraintosee -c $CONFIG next
+
+  À refaire dans chaque nouveau terminal. Pour une commande isolée, sans
+  activer quoi que ce soit :
+
+      ./.venv/bin/nexttraintosee -c $CONFIG next
+MSG
