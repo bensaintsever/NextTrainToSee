@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable, Sequence
 
+from . import __version__
 from .config import AppConfig
 from .gtfs import GtfsError, GtfsFeed
 from .observation import Observation, ObservationKind
@@ -350,6 +351,11 @@ class PassageService:
         window = self.feed.calendar.coverage()
         return {
             "ok": True,
+            # Un serveur lancé avant une mise à jour continue de tourner avec
+            # l'ancien code, tout en servant la nouvelle page : les champs que
+            # celle-ci envoie et qu'il ignore disparaissent sans bruit. Publier
+            # la version rend cet écart visible.
+            "version": __version__,
             "feed_start": window[0].isoformat() if window else None,
             "feed_end": window[1].isoformat() if window else None,
             "realtime_age_s": (now - last_refresh).total_seconds() if last_refresh else None,

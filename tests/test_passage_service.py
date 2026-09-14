@@ -422,3 +422,12 @@ def test_the_app_sources_are_distinguished_when_binding(service: PassageService)
         )
         assert result["binding_method"] == "designated"
         assert result["bound_to"]["trip_id"] == predicted["trip_id"]
+
+
+def test_health_publishes_the_running_version(service: PassageService):
+    # Sans cela, un serveur resté en marche après une mise à jour sert la
+    # nouvelle page avec l'ancien code, et ignore silencieusement les champs
+    # que celle-ci lui envoie.
+    from nexttraintosee import __version__
+
+    assert service.health_response()["version"] == __version__
