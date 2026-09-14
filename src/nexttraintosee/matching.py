@@ -75,39 +75,84 @@ def match_observations(
     passages: Sequence[Passage],
     tolerance_s: float = 180.0,
 ) -> MatchResult:
-    """Apparie détections et prédictions, au plus une fois chacune.
+    """Apparie observations et prédictions, au plus une fois chacune.
 
-    On construit tous les couples compatibles puis on les attribue par écart
-    croissant : un appariement glouton sur l'écart absolu, qui évite qu'une
-    détection précoce ne monopolise le mauvais train.
+    Deux régimes, dans cet ordre :
+
+    1. **Les désignations d'abord.** Une observation qui porte un `trip_id` sait
+       à quelle circulation elle se rapporte — un humain l'a établi sur le
+       terrain. Elle n'est donc pas soumise à la tolérance temporelle : c'est
+       précisément quand l'écart est grand que cette observation vaut cher, et
+       la lui refuser reviendrait à ne mesurer que les petits écarts.
+    2. **Le reste par l'heure**, en attribuant par écart croissant : un
+       appariement glouton qui évite qu'une observation précoce ne monopolise
+       le mauvais train.
 
     Args:
         observations: passages rapportés, capteur ou humains.
         passages: passages prédits sur la même période.
-        tolerance_s: écart maximal toléré entre observé et prédit.
+        tolerance_s: écart maximal toléré, pour les seules observations
+            qui ne désignent aucune circulation.
     """
-    candidates = []
-    for detection_index, detection in enumerate(observations):
-        for passage_index, passage in enumerate(passages):
-            gap = abs((detection.midpoint - passage.when).total_seconds())
-            if gap <= tolerance_s:
-                candidates.append((gap, detection_index, passage_index))
-    candidates.sort()
-
-    used_detections: set[int] = set()
+    matched_observations: set[int] = set()
+    # Les observations qui désignent leur circulation sont retirées de
+    # l'appariement par l'heure, qu'une correspondance ait été trouvée ou non.
+    designated_observations: set[int] = set()
     used_passages: set[int] = set()
     matches: list[Match] = []
-    for _, detection_index, passage_index in candidates:
-        if detection_index in used_detections or passage_index in used_passages:
+
+    by_trip: dict[str, list[int]] = {}
+    for index, passage in enumerate(passages):
+        by_trip.setdefault(passage.trip_id, []).append(index)
+
+    for observation_index, observation in enumerate(observations):
+        trip_id = getattr(observation, "trip_id", None)
+        if not trip_id:
             continue
-        used_detections.add(detection_index)
+        # Une observation qui désigne sa circulation ne retombe jamais sur
+        # l'appariement par l'heure : la lier à un autre train contredirait
+        # l'observateur, ce qui est précisément l'erreur qu'on cherche à éviter.
+        # Sans correspondance, elle reste non appariée — et son absence dit
+        # quelque chose : la circulation désignée n'était pas dans les
+        # prédictions enregistrées.
+        designated_observations.add(observation_index)
+        free = [i for i in by_trip.get(trip_id, ()) if i not in used_passages]
+        if not free:
+            continue
+        # Une circulation peut figurer deux fois — elle arrive, puis repart.
+        nearest = min(
+            free,
+            key=lambda i: abs((passages[i].when - observation.midpoint).total_seconds()),
+        )
+        matched_observations.add(observation_index)
+        used_passages.add(nearest)
+        matches.append(Match(observation, passages[nearest]))
+
+    candidates = []
+    for observation_index, observation in enumerate(observations):
+        if observation_index in designated_observations:
+            continue
+        for passage_index, passage in enumerate(passages):
+            if passage_index in used_passages:
+                continue
+            gap = abs((observation.midpoint - passage.when).total_seconds())
+            if gap <= tolerance_s:
+                candidates.append((gap, observation_index, passage_index))
+    candidates.sort()
+
+    for _, observation_index, passage_index in candidates:
+        if observation_index in matched_observations or passage_index in used_passages:
+            continue
+        matched_observations.add(observation_index)
         used_passages.add(passage_index)
-        matches.append(Match(observations[detection_index], passages[passage_index]))
+        matches.append(Match(observations[observation_index], passages[passage_index]))
 
     matches.sort(key=lambda m: m.observation.midpoint)
     return MatchResult(
         matches=matches,
-        unmatched_detections=[d for i, d in enumerate(observations) if i not in used_detections],
+        unmatched_detections=[
+            o for i, o in enumerate(observations) if i not in matched_observations
+        ],
         unmatched_passages=[p for i, p in enumerate(passages) if i not in used_passages],
     )
 

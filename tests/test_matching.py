@@ -303,3 +303,68 @@ def test_line_speed_fitting_rejects_impossible_inputs():
         fit_line_speed_kmh(0.0, 100.0, TractionProfile())
     with pytest.raises(ValueError, match="strictement positives"):
         fit_line_speed_kmh(1000.0, 0.0, TractionProfile())
+
+
+# -- appariement d'une observation qui désigne sa circulation -----------------
+
+
+def designated(offset_s: float, trip_id: str):
+    """Une observation humaine qui sait à quel train elle se rapporte."""
+    from nexttraintosee.observation import Observation, ObservationKind
+
+    return Observation(
+        observed_at=NOON + timedelta(seconds=offset_s),
+        kind=ObservationKind.SEEN,
+        source="manuel",
+        trip_id=trip_id,
+        precision_s=5.0,
+    )
+
+
+def test_a_designation_wins_over_a_nearer_passage():
+    # Le cas vécu : l'observation est temporellement plus proche d'un autre
+    # train, mais l'observateur sait lequel il a vu.
+    observation = designated(0, "attendu")
+    result = match_observations(
+        [observation], [passage(-10, trip_id="plus-proche"), passage(-250, trip_id="attendu")]
+    )
+
+    assert len(result.matches) == 1
+    assert result.matches[0].passage.trip_id == "attendu"
+
+
+def test_a_designation_is_not_limited_by_the_tolerance():
+    # Sans cela, un retard de quatre minutes reste invisible : c'est exactement
+    # ce qui rendait le recalage flatteur.
+    observation = designated(0, "tres-en-retard")
+    result = match_observations(
+        [observation], [passage(-600, trip_id="tres-en-retard")], tolerance_s=180.0
+    )
+
+    assert len(result.matches) == 1
+    assert result.matches[0].residual_s == pytest.approx(600.0)
+
+
+def test_an_undesignated_observation_still_matches_by_time():
+    result = match_observations([detection(10)], [passage(0, trip_id="T")])
+    assert len(result.matches) == 1
+    assert result.matches[0].residual_s == pytest.approx(10.0)
+
+
+def test_a_designated_passage_is_not_stolen_by_a_closer_observation():
+    designated_obs = designated(0, "reserve")
+    intruder = detection(5)
+    result = match_observations(
+        [designated_obs, intruder],
+        [passage(-200, trip_id="reserve"), passage(20, trip_id="libre")],
+    )
+
+    by_trip = {m.observation: m.passage.trip_id for m in result.matches}
+    assert by_trip[designated_obs] == "reserve"
+    assert by_trip[intruder] == "libre"
+
+
+def test_a_designation_pointing_nowhere_leaves_the_observation_unmatched():
+    result = match_observations([designated(0, "inconnu")], [passage(0, trip_id="autre")])
+    assert result.matches == []
+    assert len(result.unmatched_detections) == 1

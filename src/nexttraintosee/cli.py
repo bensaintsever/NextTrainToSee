@@ -522,6 +522,21 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     print(f"{result.summary()}\n")
 
     if result.matches:
+        # Un passage prédit sans retard temps réel est un horaire théorique :
+        # l'écart mesuré y mélange l'erreur du modèle et le retard réel du
+        # train, que rien ne permet ensuite de séparer. Recaler là-dessus
+        # revient à corriger le modèle du retard des trains.
+        theoretical = [m for m in result.matches if m.passage.delay_s is None]
+        if theoretical:
+            share = 100 * len(theoretical) / len(result.matches)
+            print(
+                f"⚠ {len(theoretical)} appariement(s) sur {len(result.matches)} "
+                f"({share:.0f} %) portent sur un horaire théorique, sans temps réel.\n"
+                "  L'écart y confond erreur du modèle et retard du train : le recalage\n"
+                "  qui suit en hérite. Pour des prédictions horodatées temps réel,\n"
+                "  faites tourner `./scripts/collect.sh` en fond.\n"
+            )
+
         calibration = calibrate(result.matches)
         print(f"Recalage : {calibration.describe()}")
 
