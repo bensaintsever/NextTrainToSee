@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import importlib
 import logging
 import socket
@@ -987,6 +988,26 @@ def _lan_ip() -> str | None:
         return None
 
 
+def _mesh_ip() -> str | None:
+    """Adresse du poste sur un réseau maillé privé, s'il y en a un.
+
+    Tailscale et consorts attribuent des adresses dans 100.64.0.0/10. Elles
+    valent bien plus que l'adresse du réseau local pour ce projet : elles
+    restent joignables depuis un téléphone en 4G, donc depuis le point
+    d'observation lui-même, là où le Wi-Fi de la maison ne porte pas.
+    """
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+    except OSError:
+        return None
+    for info in infos:
+        address = info[4][0]
+        first, second = (int(part) for part in address.split(".")[:2])
+        if first == 100 and 64 <= second <= 127:
+            return address
+    return None
+
+
 def _mdns_hostname() -> str:
     """Nom d'hôte mDNS du poste, tel qu'un iPhone le résoudrait en « .local ».
 
@@ -1013,13 +1034,37 @@ def cmd_serve(args: argparse.Namespace) -> int:
     service.start()
 
     webapp_dir = args.webapp_dir if args.webapp_dir is not None else DEFAULT_WEBAPP_DIR
-    server = create_server(service, host=args.host, port=args.port, webapp_dir=webapp_dir)
+    try:
+        server = create_server(service, host=args.host, port=args.port, webapp_dir=webapp_dir)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        # Occuper un port déjà pris est la façon la plus banale d'échouer ici,
+        # et la plus probable est qu'on ait simplement relancé un serveur déjà
+        # en marche. Une trace Python n'aide personne à s'en rendre compte.
+        service.stop()
+        print(
+            f"Le port {args.port} est déjà occupé.\n"
+            "\n"
+            "  Si `serve` tourne déjà, l'application est accessible : pas besoin\n"
+            "  de le relancer.\n"
+            "\n"
+            f"  Pour savoir qui l'occupe :  lsof -i :{args.port}\n"
+            f"  Pour en utiliser un autre :  nexttraintosee serve --port {args.port + 1}",
+            file=sys.stderr,
+        )
+        return 2
     port = server.server_address[1]
     hostname = _mdns_hostname()
     lan_ip = _lan_ip()
+    mesh_ip = _mesh_ip()
 
     print(f"{config.site.name}")
     print(f"Serveur démarré sur http://{args.host}:{port}")
+    if mesh_ip:
+        # La seule adresse qui vaille depuis la passerelle : le Wi-Fi de la
+        # maison n'y porte pas, un réseau maillé privé si.
+        print(f"Depuis le téléphone, partout (réseau maillé) : http://{mesh_ip}:{port}")
     if lan_ip:
         # Android ne résout pas les noms mDNS en « .local » de façon fiable :
         # l'adresse IP est la seule qui fonctionne à coup sûr sur un Pixel.

@@ -825,3 +825,63 @@ def test_tracks_writes_a_geojson_file(tracks_config, tmp_path, capsys):
     titles = [f["properties"].get("title", "") for f in collection["features"]]
     assert "Point d'observation" in titles
     assert any("Sète-Ville" in t for t in titles)
+
+
+def test_serve_reports_a_busy_port_instead_of_a_traceback(config_path, capsys):
+    # Relancer un serveur déjà en marche est l'échec le plus courant de cette
+    # commande : il doit se lire, pas se décoder dans une trace Python.
+    import socket
+
+    holder = socket.socket()
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        code = run(config_path, "serve", "--host", "127.0.0.1", "--port", str(port))
+    finally:
+        holder.close()
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert f"port {port} est déjà occupé" in err
+    assert "lsof" in err
+    assert "Traceback" not in err
+
+
+def test_a_mesh_address_is_recognised_and_a_lan_one_is_not():
+    # Les réseaux maillés privés (Tailscale et consorts) attribuent des adresses
+    # dans 100.64.0.0/10 : ce sont les seules joignables depuis le point
+    # d'observation, hors du Wi-Fi domestique.
+    from nexttraintosee import cli
+
+    def with_addresses(*addresses):
+        return lambda *a, **k: [(None, None, None, None, (ip, 0)) for ip in addresses]
+
+    original = cli.socket.getaddrinfo
+    try:
+        cli.socket.getaddrinfo = with_addresses("192.168.1.20", "100.101.102.103")
+        assert cli._mesh_ip() == "100.101.102.103"
+
+        cli.socket.getaddrinfo = with_addresses("192.168.1.20", "10.0.0.5")
+        assert cli._mesh_ip() is None
+
+        # 100.128.x sort de la plage : c'est une adresse publique ordinaire.
+        cli.socket.getaddrinfo = with_addresses("100.128.0.1")
+        assert cli._mesh_ip() is None
+    finally:
+        cli.socket.getaddrinfo = original
+
+
+def test_mesh_detection_survives_a_resolution_failure():
+    from nexttraintosee import cli
+
+    original = cli.socket.getaddrinfo
+    try:
+        def boom(*a, **k):
+            raise OSError("pas de résolution")
+
+        cli.socket.getaddrinfo = boom
+        assert cli._mesh_ip() is None
+    finally:
+        cli.socket.getaddrinfo = original
