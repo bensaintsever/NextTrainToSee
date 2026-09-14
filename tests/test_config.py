@@ -200,9 +200,13 @@ def test_the_shipped_configuration_separates_omnibus_from_through_trains():
     assert set(categories) == {"ter", "grandes-lignes"}
     assert categories["ter"].matches("870300 C5 Toulouse Matabiau - Auch")
     assert categories["grandes-lignes"].matches("4756 560B Bordeaux - Marseille")
-    # Les trains sans arrêt ne doivent pas hériter de la vitesse des omnibus.
-    assert categories["grandes-lignes"].line_speed_kmh == 120.0
+    # Ce qui distingue vraiment un train sans arrêt, c'est son accélération :
+    # l'avant-gare à 30 km/h est de l'infrastructure et s'impose à tous, si bien
+    # que les vitesses équivalentes des deux catégories se rejoignent presque.
+    assert categories["grandes-lignes"].accel_ms2 == 0.35
     assert categories["ter"].line_speed_kmh is None
+    # La limite de voie, 120 km/h, n'est pas atteignable sur ces 1 564 m.
+    assert categories["grandes-lignes"].line_speed_kmh == 59.0
 
 
 def test_an_approach_restriction_is_read_when_declared():
@@ -220,3 +224,16 @@ line_speed_kmh = 113
 
 def test_a_branch_without_an_approach_restriction_has_none():
     assert parse(MINIMAL).site.branches[0].approach_speed_kmh is None
+
+
+def test_the_site_speeds_reflect_the_measured_profile_not_the_line_limit():
+    # Les 1 564 m qui séparent la gare du point comportent un avant-gare à
+    # 30 km/h : la vitesse configurée est celle qui reproduit ce profil, pas la
+    # limite de l'infrastructure. Un retour à ~113 km/h signalerait qu'on a
+    # recopié une sortie de `validate --fit` sans tenir compte du profil.
+    config = load_config(Path(__file__).resolve().parents[1] / "config" / "toulouse-guilhemery.toml")
+    speeds = {b.branch_id: b.line_speed_kmh for b in config.site.branches}
+
+    assert speeds["sud"] == 60.0
+    assert speeds["ouest"] == 60.0
+    assert config.site.profile.sinuosity == 1.02

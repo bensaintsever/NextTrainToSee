@@ -30,7 +30,9 @@ decel_ms2 = 0.6
 # corridors du secteur ; c'est un plafond d'infrastructure, pas la marche réelle
 # d'un TER en sortie de gare — `calibrate` ajustera.
 line_speed_kmh = 120.0
-sinuosity = 1.05
+# Mesurée sur la géométrie OSM du site : 1 564 m de voie pour 1 534 m à vol
+# d'oiseau. Sert de repli pour une branche dont la distance n'a pas été relevée.
+sinuosity = 1.02
 
 # --- Branches au départ de Toulouse-Matabiau --------------------------------
 # `bearing_deg` = cap depuis la gare vers les gares situées sur la branche.
@@ -55,8 +57,17 @@ bearing_deg = 184.2
 passes_observer = true
 # Corridor c1, à 1 m du point : les voies passent au ras de la position.
 track_distance_m = 1564.0
-# Ajusté sur le parcours le plus rapide vers Saint-Agne (3836 m en 3 min 00 s).
-line_speed_kmh = 113.0
+# 60 km/h n'est pas la limite de l'infrastructure : c'est la vitesse unique qui
+# reproduit, sur ces 1 564 m, le profil relevé sur OpenStreetMap — 30 km/h sur
+# les 358 premiers mètres d'avant-gare, puis 90. Le modèle n'appliquant qu'une
+# vitesse par branche, c'est la seule façon d'y représenter un profil non
+# uniforme.
+#
+# La valeur précédente, 113 km/h, venait de `validate --fit` calé sur le
+# parcours entier vers Saint-Agne (3 836 m en 3 min). Elle est juste pour ce
+# parcours-là, où un début lent est compensé par une fin à 130 km/h ou plus —
+# mais fausse de +29 s sur le seul tronçon qui nous intéresse.
+line_speed_kmh = 60.0
 
 [[branches]]
 id = "nord"
@@ -78,7 +89,7 @@ bearing_deg = 269.8
 # Le maintien à true est donc une décision, pas un oubli.
 passes_observer = true
 track_distance_m = 1564.0   # même tronc commun que la branche « sud »
-line_speed_kmh = 113.0      # idem
+line_speed_kmh = 60.0       # idem : même avant-gare, même profil
 
 # --- Types de matériel ------------------------------------------------------
 # Les circulations sont rattachées à la première catégorie dont le motif
@@ -108,7 +119,11 @@ pattern = "\\b\\d{4,5}\\b"
 # automoteur. À confirmer au capteur.
 accel_ms2 = 0.35
 decel_ms2 = 0.50
-line_speed_kmh = 120.0
+# Même raisonnement que pour les branches : l'avant-gare à 30 km/h est de
+# l'infrastructure, elle s'impose à un TGV comme à un omnibus. La vitesse
+# équivalente au profil relevé, pour une rame tractée, est de 59 km/h — et non
+# les 120 de la limite de voie, qui donnaient 24 s d'avance.
+line_speed_kmh = 59.0
 
 [data]
 gtfs_path = "../data/sncf-gtfs.zip"

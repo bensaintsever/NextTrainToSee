@@ -762,6 +762,20 @@ def _print_speed_fit(config: AppConfig, feed, checks) -> None:
         return
 
     print("Vitesse de ligne ajustée sur l'horaire le plus rapide, branche par branche :\n")
+    # Mise en garde née d'une erreur constatée : sur le site de référence, cet
+    # ajustement proposait 113 km/h pour une branche dont les 1 564 premiers
+    # mètres se parcourent en réalité à 60 km/h équivalents. La valeur était
+    # juste pour le segment entier, où un avant-gare lent est compensé par une
+    # fin de parcours rapide — et fausse de 29 s sur la portion prédite.
+    print(
+        "  \u26a0 Ces vitesses sont calées sur le segment gare <-> gare voisine,\n"
+        "    souvent bien plus long que les quelques kilomètres qui séparent la\n"
+        "    gare du point d'observation. Quand la voie change de vitesse en\n"
+        "    route — un avant-gare lent, une restriction — la moyenne obtenue est\n"
+        "    juste pour le segment et fausse pour la portion prédite.\n"
+        "    `tracks --profile` dit si le profil est uniforme ; s'il ne l'est pas,\n"
+        "    préférez la vitesse qui reproduit le temps de parcours relevé.\n"
+    )
     for branch_id, (speed, check) in sorted(suggestions.items()):
         print("[[branches]]")
         print(f'id = "{branch_id}"')
