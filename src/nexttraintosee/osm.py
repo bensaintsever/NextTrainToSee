@@ -696,6 +696,11 @@ def to_geojson(
                     },
                     "properties": {
                         "title": segment.describe(),
+                        # Le nom du tronçon dit s'il s'agit d'une ligne
+                        # principale ou d'une voie de service : près d'une gare,
+                        # c'est ce qui permet de juger si le profil suit
+                        # l'itinéraire que prennent réellement les trains.
+                        "voie": segment.label,
                         "corridor": corridor.corridor_id,
                         "maxspeed_kmh": segment.maxspeed_kmh,
                         "tunnel": segment.tunnel,

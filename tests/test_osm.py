@@ -480,3 +480,14 @@ def test_a_genuinely_parallel_track_remains_its_own_corridor():
 
     assert len(corridors) == 2
     assert [round(c.distance_m) for c in corridors] == [0, 300]
+
+
+def test_geojson_names_the_osm_way_behind_each_segment():
+    # Près d'une gare, savoir si un tronçon à 30 km/h est une ligne principale
+    # ou une voie de service change entièrement la lecture du profil.
+    corridor, ways, anchor = _profiled_corridor()
+    features = to_geojson([corridor], ways, POINT, anchor)
+    segments = [f["properties"] for f in features if "maxspeed_kmh" in f["properties"]]
+
+    assert segments
+    assert all(p.get("voie") for p in segments)
