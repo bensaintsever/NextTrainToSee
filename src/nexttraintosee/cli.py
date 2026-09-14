@@ -24,6 +24,7 @@ from .osm import (
     merged_length_m,
     nearest_stops,
     speed_profile,
+    to_geojson,
 )
 from .predict import Passage, next_passages, predict_passages, service_days_around
 from .report import csv_rows, french_date, hourly_histogram, render_histogram
@@ -311,6 +312,22 @@ def cmd_tracks(args: argparse.Namespace) -> int:
                     "représenter — il n'applique qu'une vitesse par branche."
                 )
             print()
+
+    if args.geojson:
+        import json
+
+        collection = to_geojson(
+            corridors, ways, config.site.position, anchor, config.site.anchor_station
+        )
+        args.geojson.parent.mkdir(parents=True, exist_ok=True)
+        args.geojson.write_text(
+            json.dumps(collection, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        print(
+            f"Géométrie écrite dans {args.geojson} "
+            f"({len(collection['features'])} objets).\n"
+            "  Déposez le fichier sur https://geojson.io pour la voir sur un fond de carte.\n"
+        )
 
     if anchor is not None:
         suggestions = suggest_branches(config, corridors)
@@ -1029,6 +1046,10 @@ def build_parser() -> argparse.ArgumentParser:
     tracks.add_argument("--refresh", action="store_true", help="ignorer le cache Overpass")
     tracks.add_argument(
         "--include-service", action="store_true", help="inclure les voies de service"
+    )
+    tracks.add_argument(
+        "--geojson", type=Path, default=None,
+        help="écrire la géométrie résolue dans un fichier GeoJSON, à ouvrir sur une carte",
     )
     tracks.add_argument(
         "--profile", action="store_true",

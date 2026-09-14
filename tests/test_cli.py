@@ -811,3 +811,17 @@ def test_next_can_print_the_identifiers_needed_to_designate(config_path, capsys)
 
     assert "T:SE:1" in with_ids
     assert "T:SE:1" not in without
+
+
+def test_tracks_writes_a_geojson_file(tracks_config, tmp_path, capsys):
+    import json
+
+    out = tmp_path / "carte" / "geometrie.json"
+    assert run(tracks_config, "tracks", "--geojson", str(out)) == 0
+
+    assert "geojson.io" in capsys.readouterr().out
+    collection = json.loads(out.read_text(encoding="utf-8"))
+    assert collection["type"] == "FeatureCollection"
+    titles = [f["properties"].get("title", "") for f in collection["features"]]
+    assert "Point d'observation" in titles
+    assert any("Sète-Ville" in t for t in titles)

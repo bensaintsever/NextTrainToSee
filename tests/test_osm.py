@@ -5,14 +5,16 @@ from nexttraintosee.osm import (
     MAX_ANCHOR_OFFSET_M,
     RailStop,
     RailWay,
+    SpeedSegment,
     build_corridors,
     build_query,
-    nearest_stops,
-    SpeedSegment,
     merged_length_m,
+    nearest_stops,
     parse_overpass,
+    slice_polyline,
     speed_profile,
     stitch_ways,
+    to_geojson,
 )
 
 POINT = (43.597833, 1.458194)
@@ -372,3 +374,74 @@ def test_merged_length_does_not_count_overlaps_twice():
     assert merged_length_m([seg(0, 300)] * 4) == pytest.approx(300.0)
     assert merged_length_m([seg(0, 100), seg(50, 200), seg(400, 450)]) == pytest.approx(250.0)
     assert merged_length_m([]) == 0.0
+
+
+# -- export cartographique ---------------------------------------------------
+
+
+def _profiled_corridor():
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    fast = _way(1, (anchor, from_local_xy(POINT, (0.0, 1000.0))), maxspeed="120")
+    tunnel = _way(2, (fast.geometry[-1], from_local_xy(POINT, (0.0, 900.0))),
+                  maxspeed="90", tunnel="yes")
+    slow = _way(3, (tunnel.geometry[-1], from_local_xy(POINT, (0.0, -400.0))), maxspeed="30")
+    ways = [fast, tunnel, slow]
+    return build_corridors(ways, POINT)[0], ways, anchor
+
+
+def test_geojson_carries_the_point_the_station_and_the_corridor():
+    corridor, ways, anchor = _profiled_corridor()
+    collection = to_geojson([corridor], ways, POINT, anchor, "Toulouse Matabiau")
+
+    assert collection["type"] == "FeatureCollection"
+    titles = [f["properties"].get("title", "") for f in collection["features"]]
+    assert "Point d'observation" in titles
+    assert "Toulouse Matabiau" in titles
+    points = [f for f in collection["features"] if f["geometry"]["type"] == "Point"]
+    assert len(points) == 2
+
+
+def test_geojson_uses_longitude_first_as_the_format_requires():
+    corridor, ways, anchor = _profiled_corridor()
+    observer = to_geojson([corridor], ways, POINT, anchor)["features"][0]
+    longitude, latitude = observer["geometry"]["coordinates"]
+
+    assert longitude == pytest.approx(POINT[1])
+    assert latitude == pytest.approx(POINT[0])
+
+
+def test_geojson_colours_segments_by_speed_and_thickens_tunnels():
+    corridor, ways, anchor = _profiled_corridor()
+    features = to_geojson([corridor], ways, POINT, anchor)["features"]
+    segments = [f for f in features if "maxspeed_kmh" in f["properties"]]
+
+    by_speed = {f["properties"]["maxspeed_kmh"]: f["properties"] for f in segments}
+    assert by_speed[30.0]["stroke"] != by_speed[120.0]["stroke"]
+    assert by_speed[90.0]["tunnel"] is True
+    assert by_speed[90.0]["stroke-width"] > by_speed[30.0]["stroke-width"]
+
+
+def test_geojson_segments_are_drawn_where_they_belong():
+    corridor, ways, anchor = _profiled_corridor()
+    features = to_geojson([corridor], ways, POINT, anchor)["features"]
+    tunnel = next(f for f in features if f["properties"].get("tunnel") is True)
+
+    # Le tunnel court de 564 à 664 m de la gare : sa géométrie doit être
+    # longue d'une centaine de mètres, pas de la ligne entière.
+    coords = [(c[1], c[0]) for c in tunnel["geometry"]["coordinates"]]
+    assert polyline_length_m(coords) == pytest.approx(100.0, abs=10.0)
+
+
+def test_geojson_without_a_station_still_describes_the_corridors():
+    corridor, ways, _ = _profiled_corridor()
+    collection = to_geojson([corridor], ways, POINT)
+
+    lines = [f for f in collection["features"] if f["geometry"]["type"] == "LineString"]
+    assert len(lines) == 1  # la polyligne du corridor, sans profil de vitesse
+
+
+def test_slicing_a_polyline_returns_the_requested_span():
+    line = [from_local_xy(POINT, (0.0, y)) for y in (0.0, 500.0, 1000.0)]
+    portion = slice_polyline(line, 200.0, 800.0)
+    assert polyline_length_m(portion) == pytest.approx(600.0, abs=1.0)
+    assert slice_polyline(line, 500.0, 500.0) == []

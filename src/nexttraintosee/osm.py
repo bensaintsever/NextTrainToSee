@@ -28,6 +28,7 @@ from typing import Any, Iterable, Sequence
 
 from .geo import (
     LatLon,
+    cumulative_lengths_m,
     Projection,
     axis_distance_deg,
     bearing_distance_deg,
@@ -570,6 +571,133 @@ def speed_profile(
 
     segments.sort(key=lambda s: s.start_m)
     return segments
+
+
+def slice_polyline(
+    polyline: Sequence[LatLon], start_m: float, end_m: float
+) -> list[LatLon]:
+    """Extrait la portion d'une polyligne entre deux abscisses curvilignes."""
+    if end_m <= start_m:
+        return []
+    cumulative = cumulative_lengths_m(polyline)
+    points = [interpolate_along(polyline, start_m)]
+    points.extend(
+        vertex
+        for vertex, along in zip(polyline, cumulative)
+        if start_m < along < end_m
+    )
+    points.append(interpolate_along(polyline, end_m))
+    return points
+
+
+def _speed_colour(maxspeed_kmh: float | None) -> str:
+    """Couleur simplestyle d'un tronçon, selon sa vitesse."""
+    if maxspeed_kmh is None:
+        return "#8E8E93"
+    if maxspeed_kmh < 40:
+        return "#C0392B"
+    if maxspeed_kmh < 80:
+        return "#E67E22"
+    if maxspeed_kmh < 110:
+        return "#2980B9"
+    return "#27AE60"
+
+
+def to_geojson(
+    corridors: Sequence["Corridor"],
+    ways: Sequence[RailWay],
+    observer: LatLon,
+    anchor: LatLon | None = None,
+    anchor_name: str = "gare d'appui",
+) -> dict[str, Any]:
+    """Assemble la géométrie résolue en une collection GeoJSON.
+
+    Destinée à être déposée sur un fond de carte — geojson.io, QGIS, My Maps —
+    pour voir ce que l'outil a réellement trouvé, plutôt que de s'en remettre à
+    la description qu'il en fait. Les propriétés suivent la convention
+    « simplestyle », comprise par la plupart des visualiseurs.
+    """
+    features: list[dict[str, Any]] = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [observer[1], observer[0]]},
+            "properties": {
+                "title": "Point d'observation",
+                "marker-color": "#B5312B",
+                "marker-symbol": "star",
+            },
+        }
+    ]
+    if anchor is not None:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [anchor[1], anchor[0]]},
+                "properties": {
+                    "title": anchor_name,
+                    "marker-color": "#1D6B77",
+                    "marker-symbol": "rail",
+                },
+            }
+        )
+
+    for corridor in corridors:
+        centerline = list(corridor.centerline)
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[p[1], p[0]] for p in centerline],
+                },
+                "properties": {
+                    "title": f"{corridor.corridor_id} — {corridor.label}",
+                    "description": (
+                        f"{corridor.distance_m:.0f} m du point · "
+                        f"axe {corridor.axis_deg:.0f}° · "
+                        f"{corridor.segment_count} tronçon(s)"
+                    ),
+                    "stroke": "#4A4A4A",
+                    "stroke-width": 1,
+                    "stroke-opacity": 0.45,
+                },
+            }
+        )
+
+        if anchor is None:
+            continue
+        anchor_along = project_on_polyline(anchor, centerline).along_m
+        forward = 1.0 if corridor.projection.along_m >= anchor_along else -1.0
+        for segment in speed_profile(corridor, ways, anchor):
+            bounds = sorted(
+                (anchor_along + forward * segment.start_m, anchor_along + forward * segment.end_m)
+            )
+            portion = slice_polyline(centerline, bounds[0], bounds[1])
+            if len(portion) < 2:
+                continue
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[p[1], p[0]] for p in portion],
+                    },
+                    "properties": {
+                        "title": segment.describe(),
+                        "corridor": corridor.corridor_id,
+                        "maxspeed_kmh": segment.maxspeed_kmh,
+                        "tunnel": segment.tunnel,
+                        "bridge": segment.bridge,
+                        "start_m": round(segment.start_m),
+                        "end_m": round(segment.end_m),
+                        "stroke": _speed_colour(segment.maxspeed_kmh),
+                        "stroke-width": 6 if segment.tunnel else 4,
+                        "stroke-opacity": 0.9,
+                    },
+                }
+            )
+
+    return {"type": "FeatureCollection", "features": features}
 
 
 def build_query(
