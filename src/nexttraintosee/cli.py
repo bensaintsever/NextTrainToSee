@@ -283,8 +283,21 @@ def cmd_tracks(args: argparse.Namespace) -> int:
             segments = speed_profile(corridor, ways, anchor)
             if not segments:
                 continue
-            print(f"Profil de voie, {config.site.anchor_station} → point, corridor "
-                  f"{corridor.corridor_id} « {corridor.label} » :\n")
+            print(
+                f"Profil de voie, {config.site.anchor_station} → point, corridor "
+                f"{corridor.corridor_id} « {corridor.label} » :"
+            )
+            # Le relevé suit une seule voie du faisceau. Les voies d'un même
+            # corridor n'ont pas nécessairement la même limite, et un train peut
+            # emprunter l'autre : lire ce profil comme celui du corridor entier
+            # conduirait à des conclusions fausses.
+            if corridor.segment_count > 1:
+                print(
+                    f"  ({corridor.segment_count} tronçons dans ce corridor ; le relevé "
+                    "suit la voie que longe la polyligne,\n   les voies voisines peuvent "
+                    "porter d'autres limites)"
+                )
+            print()
             for segment in segments:
                 print(f"  {segment.describe()}")
             restricted = [s for s in segments if s.maxspeed_kmh and s.maxspeed_kmh < 80]
