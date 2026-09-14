@@ -445,3 +445,38 @@ def test_slicing_a_polyline_returns_the_requested_span():
     portion = slice_polyline(line, 200.0, 800.0)
     assert polyline_length_m(portion) == pytest.approx(600.0, abs=1.0)
     assert slice_polyline(line, 500.0, 500.0) == []
+
+
+def test_a_way_stopping_short_of_the_point_is_not_a_separate_corridor():
+    # Régression : `project_on_polyline` borne la projection aux extrémités.
+    # Une voie parfaitement colinéaire qui s'arrête 383 m avant le point s'y
+    # projette donc sur son extrémité, et la distance mesurée est
+    # longitudinale, pas latérale. Sans garde, la même voie unique se
+    # présentait comme deux corridors, dont un « à 383 m » qui n'existe pas.
+    crossing = _way(1, (from_local_xy(POINT, (0.0, 383.0)), from_local_xy(POINT, (0.0, -500.0))))
+    stopping = _way(2, (from_local_xy(POINT, (0.0, 1560.0)), from_local_xy(POINT, (0.0, 383.0))))
+
+    corridors = build_corridors([crossing, stopping], POINT, max_distance_m=500)
+
+    assert len(corridors) == 1
+    assert corridors[0].distance_m == pytest.approx(0.0, abs=1.0)
+    # Le tronçon écarté du groupement rejoint tout de même la polyligne.
+    assert polyline_length_m(list(corridors[0].centerline)) == pytest.approx(2060.0, abs=10.0)
+
+
+def test_a_way_ending_just_before_the_point_is_still_accepted():
+    # OSM peut découper un tronçon à quelques mètres du point : la tolérance
+    # d'extrémité évite de perdre une voie bien réelle.
+    stub = _way(1, (from_local_xy(POINT, (0.0, 600.0)), from_local_xy(POINT, (0.0, 10.0))))
+    assert len(build_corridors([stub], POINT, max_distance_m=500)) == 1
+
+
+def test_a_genuinely_parallel_track_remains_its_own_corridor():
+    # Le garde-fou ne doit pas fusionner deux lignes réellement distinctes.
+    here = _way(1, _line(0, 0, "ns", length_m=3000))
+    beside = _way(2, _line(300, 0, "ns", length_m=3000))
+
+    corridors = build_corridors([here, beside], POINT, max_distance_m=500)
+
+    assert len(corridors) == 2
+    assert [round(c.distance_m) for c in corridors] == [0, 300]

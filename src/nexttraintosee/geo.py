@@ -104,6 +104,14 @@ class Projection:
     """Index du segment portant la projection."""
     bearing_deg: float
     """Cap du segment portant la projection, dans le sens de parcours de la polyligne."""
+    clamped: bool = False
+    """Vrai si le pied de projection est une extrémité de la polyligne.
+
+    Le point requêté est alors *au-delà* de la polyligne, et `distance_m` mesure
+    la distance à cette extrémité — pas un écart latéral. Confondre les deux
+    revient à prendre une voie qui s'arrête avant le point pour une voie
+    parallèle éloignée d'autant.
+    """
 
 
 def project_on_polyline(point: LatLon, polyline: Sequence[LatLon]) -> Projection:
@@ -134,12 +142,14 @@ def project_on_polyline(point: LatLon, polyline: Sequence[LatLon]) -> Projection
         distance = math.hypot(px, py)
         if best is None or distance < best.distance_m:
             seg_len = math.sqrt(seg_len_sq)
+            along = cumulative[i] + t * seg_len
             best = Projection(
                 point=from_local_xy(point, (px, py)),
                 distance_m=distance,
-                along_m=cumulative[i] + t * seg_len,
+                along_m=along,
                 segment_index=i,
                 bearing_deg=initial_bearing_deg(a, b),
+                clamped=along <= 1e-6 or along >= cumulative[-1] - 1e-6,
             )
 
     assert best is not None

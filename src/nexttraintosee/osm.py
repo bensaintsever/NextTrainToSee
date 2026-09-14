@@ -109,6 +109,10 @@ class RailStop:
         return self.tags.get("uic_ref") or self.tags.get("ref:SNCF")
 
 
+#: Tolérance accordée à une voie dont le pied de projection tombe sur une
+#: extrémité : OSM peut découper un tronçon à quelques mètres du point.
+ENDPOINT_TOLERANCE_M = 25.0
+
 #: En deçà de cette distance de visée, la géométrie récupérée est trop courte
 #: pour dire vers où part le corridor.
 MIN_LOOKAHEAD_M = 250.0
@@ -427,8 +431,16 @@ def build_corridors(
     candidates: list[tuple[RailWay, Projection]] = []
     for way in usable:
         projection = project_on_polyline(point, way.geometry)
-        if projection.distance_m <= max_distance_m:
-            candidates.append((way, projection))
+        if projection.distance_m > max_distance_m:
+            continue
+        # Une voie qui s'arrête avant le point s'y projette sur son extrémité :
+        # la distance mesurée est alors longitudinale, pas latérale. La retenir
+        # ferait naître un corridor fantôme, « à 383 m », là où il n'y a qu'un
+        # tronçon de la même voie qui ne va pas jusqu'au bout. Elle rejoindra
+        # tout de même le corridor par recollement.
+        if projection.clamped and projection.distance_m > ENDPOINT_TOLERANCE_M:
+            continue
+        candidates.append((way, projection))
 
     candidates.sort(key=lambda item: item[1].distance_m)
 
