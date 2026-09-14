@@ -119,6 +119,31 @@ DEFAULT_LOOKAHEAD_M = 5000.0
 
 
 @dataclass(frozen=True)
+class SpeedSegment:
+    """Un tronçon du parcours gare -> point, avec ce que la carte en dit."""
+
+    start_m: float
+    """Abscisse de début, comptée depuis la gare d'appui."""
+    end_m: float
+    maxspeed_kmh: float | None
+    tunnel: bool
+    bridge: bool
+    label: str
+
+    @property
+    def length_m(self) -> float:
+        return self.end_m - self.start_m
+
+    def describe(self) -> str:
+        speed = f"{self.maxspeed_kmh:.0f} km/h" if self.maxspeed_kmh else "vitesse non cartographiée"
+        traits = "".join(t for t, on in ((" · tunnel", self.tunnel), (" · pont", self.bridge)) if on)
+        return (
+            f"{self.start_m:6.0f} → {self.end_m:6.0f} m  "
+            f"({self.length_m:4.0f} m)  {speed}{traits}"
+        )
+
+
+@dataclass(frozen=True)
 class AnchorLink:
     """Relation géométrique entre un corridor et la gare d'appui."""
 
@@ -453,6 +478,65 @@ def build_corridors(
 
     corridors.sort(key=lambda c: c.distance_m)
     return corridors
+
+
+def speed_profile(
+    corridor: "Corridor",
+    ways: Sequence[RailWay],
+    anchor: LatLon,
+    lateral_tolerance_m: float = 25.0,
+) -> list[SpeedSegment]:
+    """Relevé des vitesses et ouvrages le long du parcours gare -> point.
+
+    Le modèle de marche ne connaît qu'une vitesse par branche, alors que la
+    voie en change plusieurs fois : une restriction de tunnel, une courbe, un
+    appareil de voie. Ce relevé montre où elles tombent, ce qu'un panneau vu
+    depuis une passerelle ne dit pas — un panneau indique une limite, pas
+    l'étendue sur laquelle elle s'applique.
+
+    Args:
+        corridor: corridor dont la polyligne sert de référence.
+        ways: tous les tronçons récupérés, pas seulement ceux du corridor.
+        anchor: position de la gare d'appui.
+        lateral_tolerance_m: écart maximal pour considérer qu'un tronçon est
+            bien celui que suit la polyligne, et non une voie parallèle.
+
+    Returns:
+        Les tronçons rencontrés entre la gare et le point, du plus proche de la
+        gare au plus proche du point.
+    """
+    centerline = list(corridor.centerline)
+    anchor_along = project_on_polyline(anchor, centerline).along_m
+    observer_along = corridor.projection.along_m
+    low, high = sorted((anchor_along, observer_along))
+
+    segments: list[SpeedSegment] = []
+    for way in ways:
+        if way.tags.get("railway") not in MAIN_RAILWAY_VALUES:
+            continue
+        middle = way.geometry[len(way.geometry) // 2]
+        if project_on_polyline(middle, centerline).distance_m > lateral_tolerance_m:
+            continue  # voie parallèle, pas le parcours suivi
+        ends = sorted(
+            project_on_polyline(point, centerline).along_m
+            for point in (way.geometry[0], way.geometry[-1])
+        )
+        start, end = max(ends[0], low), min(ends[1], high)
+        if end - start < 1.0:
+            continue
+        segments.append(
+            SpeedSegment(
+                start_m=start - low,
+                end_m=end - low,
+                maxspeed_kmh=way.maxspeed_kmh,
+                tunnel=way.tags.get("tunnel") not in (None, "no"),
+                bridge=way.tags.get("bridge") not in (None, "no"),
+                label=way.label(),
+            )
+        )
+
+    segments.sort(key=lambda s: s.start_m)
+    return segments
 
 
 def build_query(

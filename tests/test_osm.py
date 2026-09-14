@@ -9,6 +9,7 @@ from nexttraintosee.osm import (
     build_query,
     nearest_stops,
     parse_overpass,
+    speed_profile,
     stitch_ways,
 )
 
@@ -263,3 +264,63 @@ def test_build_query_sweeps_the_corridor_up_to_the_anchor():
 def test_build_query_excludes_metro_stations():
     # Sans ce filtre, les stations de métro toulousaines masquent Matabiau.
     assert '["station"!~"^(subway|light_rail|monorail)$"]' in build_query(POINT, 400.0)
+
+
+# -- relevé des vitesses le long du parcours ---------------------------------
+
+
+def test_speed_profile_locates_a_tunnel_restriction():
+    # Voie nord-sud continue, coupée en trois tronçons OSM : le tronçon central
+    # est un tunnel limité à 60, comme le laisse supposer un panneau vu au sol.
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    a = (anchor, from_local_xy(POINT, (0.0, 1200.0)))
+    b = (a[1], from_local_xy(POINT, (0.0, 800.0)))
+    c = (b[1], from_local_xy(POINT, (0.0, -500.0)))
+    ways = [
+        _way(1, a, maxspeed="113"),
+        _way(2, b, maxspeed="60", tunnel="yes"),
+        _way(3, c, maxspeed="113"),
+    ]
+    corridor = build_corridors(ways, POINT)[0]
+
+    segments = speed_profile(corridor, ways, anchor)
+
+    assert [round(s.length_m) for s in segments] == [364, 400, 800]
+    tunnel = segments[1]
+    assert tunnel.tunnel is True
+    assert tunnel.maxspeed_kmh == 60.0
+    # La restriction commence à ~364 m de la gare, pas au point d'observation.
+    assert tunnel.start_m == pytest.approx(364.0, abs=5.0)
+
+
+def test_speed_profile_stops_at_the_observation_point():
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    ways = [_way(1, (anchor, from_local_xy(POINT, (0.0, -3000.0))), maxspeed="113")]
+    corridor = build_corridors(ways, POINT)[0]
+
+    segments = speed_profile(corridor, ways, anchor)
+
+    assert len(segments) == 1
+    assert segments[0].start_m == pytest.approx(0.0, abs=1.0)
+    # Le parcours s'arrête au point, pas à la fin de la voie.
+    assert segments[0].end_m == pytest.approx(1564.0, abs=5.0)
+
+
+def test_speed_profile_ignores_parallel_tracks():
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    main = (anchor, from_local_xy(POINT, (0.0, -500.0)))
+    parallel = (from_local_xy(POINT, (300.0, 1564.0)), from_local_xy(POINT, (300.0, -500.0)))
+    ways = [_way(1, main, maxspeed="113"), _way(2, parallel, maxspeed="40")]
+    corridor = build_corridors(ways, POINT, max_distance_m=400.0, corridor_width_m=500.0)[0]
+
+    segments = speed_profile(corridor, ways, anchor)
+
+    assert [s.maxspeed_kmh for s in segments] == [113.0]
+
+
+def test_speed_profile_reports_an_unmapped_speed_rather_than_guessing():
+    anchor = from_local_xy(POINT, (0.0, 1564.0))
+    ways = [_way(1, (anchor, from_local_xy(POINT, (0.0, -500.0))))]
+    corridor = build_corridors(ways, POINT)[0]
+
+    assert speed_profile(corridor, ways, anchor)[0].maxspeed_kmh is None

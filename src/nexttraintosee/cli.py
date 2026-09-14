@@ -17,7 +17,7 @@ from .coverage import analyse, summarise_delays
 from .geo import bearing_distance_deg, initial_bearing_deg
 from .gtfs import GtfsError, GtfsFeed
 from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_observations, runs_from_matches
-from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops
+from .osm import OverpassClient, OverpassError, build_corridors, nearest_stops, speed_profile
 from .predict import Passage, next_passages, predict_passages, service_days_around
 from .report import csv_rows, french_date, hourly_histogram, render_histogram
 from .realtime import RealtimeError, empty_snapshot, load_snapshot
@@ -270,6 +270,25 @@ def cmd_tracks(args: argparse.Namespace) -> int:
         for stop, distance in nearest_stops(stops, config.site.position, limit=4):
             print(f"  {distance:6.0f} m  {stop.name or '(sans nom)'} [{stop.kind}]")
         print()
+
+    if anchor is not None and args.profile:
+        for corridor in corridors:
+            segments = speed_profile(corridor, ways, anchor)
+            if not segments:
+                continue
+            print(f"Profil de voie, {config.site.anchor_station} → point, corridor "
+                  f"{corridor.corridor_id} « {corridor.label} » :\n")
+            for segment in segments:
+                print(f"  {segment.describe()}")
+            restricted = [s for s in segments if s.maxspeed_kmh and s.maxspeed_kmh < 80]
+            if restricted:
+                total = sum(s.length_m for s in restricted)
+                print(
+                    f"\n  {len(restricted)} tronçon(s) sous 80 km/h, {total:.0f} m au total : "
+                    "une restriction locale, que le modèle\n  ne sait pas représenter — il "
+                    "n'applique qu'une vitesse par branche."
+                )
+            print()
 
     if anchor is not None:
         suggestions = suggest_branches(config, corridors)
@@ -988,6 +1007,10 @@ def build_parser() -> argparse.ArgumentParser:
     tracks.add_argument("--refresh", action="store_true", help="ignorer le cache Overpass")
     tracks.add_argument(
         "--include-service", action="store_true", help="inclure les voies de service"
+    )
+    tracks.add_argument(
+        "--profile", action="store_true",
+        help="relever vitesses, tunnels et ponts le long du parcours jusqu'à la gare",
     )
     tracks.set_defaults(func=cmd_tracks)
 
