@@ -601,8 +601,11 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
                 f"⚠ {len(theoretical)} appariement(s) sur {len(result.matches)} "
                 f"({share:.0f} %) portent sur un horaire théorique, sans temps réel.\n"
                 "  L'écart y confond erreur du modèle et retard du train : le recalage\n"
-                "  qui suit en hérite. Pour des prédictions horodatées temps réel,\n"
-                "  faites tourner `./scripts/collect.sh` en fond.\n"
+                "  qui suit en hérite, et un train en retard s'y lit comme un modèle\n"
+                "  trop rapide. Pour des prédictions horodatées temps réel, laissez\n"
+                "  `nexttraintosee serve` tourner en fond : il enregistre les passages\n"
+                "  à chaque rafraîchissement. Une circulation absente du GTFS-RT\n"
+                "  restera théorique malgré tout — le temps réel ne couvre pas tout.\n"
             )
 
         calibration = calibrate(result.matches)

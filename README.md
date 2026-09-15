@@ -138,8 +138,8 @@ nexttraintosee validate
 nexttraintosee validate --fit          # propose une vitesse de ligne par branche
 
 # 5. Collecter à intervalle régulier, pour mesurer ce que valent les annonces
-./scripts/collect.sh 180        # puis, plus tard :
-nexttraintosee coverage --days 7
+nexttraintosee serve            # enregistre les passages à chaque rafraîchissement
+nexttraintosee coverage --days 7   # puis, plus tard
 
 # 6. Écouter le capteur et journaliser les passages réellement observés
 nexttraintosee listen --duration 60
