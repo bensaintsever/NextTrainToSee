@@ -67,6 +67,12 @@ track_distance_m = 1564.0
 # parcours entier vers Saint-Agne (3 836 m en 3 min). Elle est juste pour ce
 # parcours-là, où un début lent est compensé par une fin à 130 km/h ou plus —
 # mais fausse de +29 s sur le seul tronçon qui nous intéresse.
+#
+# Corroboré sur le terrain le 15/09 : un train à l'arrivée vu *avant* l'heure
+# prédite, donc plus lent que modélisé — 113 km/h doublerait l'écart. Une seule
+# observation, dont seul le signe est fiable (l'heure a été estimée de mémoire,
+# pas lue) : elle ne dit pas que 60 est la bonne valeur, elle dit qu'il ne faut
+# pas remonter.
 line_speed_kmh = 60.0
 
 [[branches]]
