@@ -83,26 +83,34 @@
   <button id="toast-action" class="toast-action" type="button" hidden></button>
 </div>
 
-<!-- Carte différée : « le train de HH:MM est-il passé ? » -->
+<!-- Carte différée : rattrape un passage qu'on n'a pas signalé sur le moment.
+     Aucun de ses boutons n'invente d'heure : « Oui » ouvre la saisie, « Non »
+     enregistre une absence, « Je ne sais plus » n'écrit rien du tout. -->
 <div id="confirm-card" class="confirm-card" hidden>
   <p id="confirm-text" class="confirm-text"></p>
+  <p id="confirm-train" class="confirm-train"></p>
   <div class="confirm-actions">
-    <button id="confirm-yes" class="btn btn-small">Oui</button>
-    <button id="confirm-no" class="btn btn-small btn-secondary">Non</button>
+    <button id="confirm-yes" class="btn btn-small">Oui, à…</button>
+    <button id="confirm-no" class="btn btn-small btn-secondary">Non, rien vu</button>
   </div>
+  <button id="confirm-skip" class="link-btn" type="button">Je ne sais plus</button>
 </div>
 
-<!-- Bottom sheet : précision manuelle après un « Non » -->
+<!-- Bottom sheet : l'heure réellement observée, saisie à la main -->
 <div id="manual-backdrop" class="sheet-backdrop" hidden></div>
 <div id="manual-sheet" class="sheet" hidden>
   <div class="sheet-handle" id="manual-handle"></div>
-  <h2 class="sheet-title">A-t-il vraiment circulé ?</h2>
+  <h2 class="sheet-title">À quelle heure l'as-tu vu ?</h2>
+  <p class="sheet-note" id="manual-note"></p>
   <label class="field">
-    <span>Heure réelle du passage</span>
-    <input type="time" id="manual-time" step="30">
+    <!-- Volontairement vide à l'ouverture : ni « maintenant » (la carte peut
+         arriver dix minutes après le passage) ni l'heure prédite (la valider
+         donnerait un écart nul par construction, et effacerait la mesure). -->
+    <span>Heure du passage</span>
+    <input type="time" id="manual-time" step="1">
   </label>
-  <button id="manual-submit" class="btn">Valider cette heure</button>
-  <button id="manual-not-passed" class="btn btn-secondary">Non, il n'est pas passé</button>
+  <button id="manual-submit" class="btn">Enregistrer cette heure</button>
+  <button id="manual-unknown" class="btn btn-ghost">Je n'ai pas noté l'heure</button>
 </div>
 
 <!-- Bottom sheet : histogramme des passages -->

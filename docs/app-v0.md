@@ -158,19 +158,40 @@ Corps, deux formes :
 { "seen": false, "anchor": "2026-09-09T22:47:43+02:00", "source": "app" }
 ```
 
+Champ optionnel commun aux deux formes : **`trip_id`**, la circulation que
+l'observateur désigne explicitement.
+
+```json
+{ "seen": true, "observed_at": "…", "precision_s": 30,
+  "source": "app:heure-saisie", "trip_id": "OCESN876255…" }
+```
+
 Réponse :
 
 ```json
 { "recorded": true, "id": 42,
   "bound_to": { "trip_id": "…", "when": "…", "headsign": "…" },
-  "ambiguous": false, "gap_s": 8.0 }
+  "ambiguous": false, "binding_method": "designated", "gap_s": 8.0 }
 ```
 
-Le serveur applique la même logique de rattachement que `observe` en ligne de
-commande (module partagé, cf. ticket 01) : rattachement au passage prédit le
-plus proche, **refusé quand deux candidats sont à portée comparable**
-(`ambiguous: true`, `bound_to: null`) — une observation mal attribuée fausse le
-recalage bien plus qu'une observation ignorée.
+Deux rattachements, jamais mélangés — `binding_method` dit lequel a servi :
+
+- **`"designated"`** — `trip_id` fourni : le serveur cherche cette circulation
+  dans une fenêtre de 30 min et s'y tient. Si elle n'y est pas, l'observation
+  est enregistrée **sans rattachement** (`bound_to: null`, méthode `"none"`) ;
+  elle ne retombe *jamais* sur le rattachement par l'heure. C'est délibéré :
+  une désignation qui échoue signale une erreur d'identifiant, et deviner à sa
+  place recréerait exactement les attributions croisées constatées le 14/09.
+- **`"nearest"`** — pas de `trip_id` : rattachement au passage prédit le plus
+  proche, **refusé quand deux candidats sont à portée comparable**
+  (`ambiguous: true`, `bound_to: null`) — une observation mal attribuée fausse
+  le recalage bien plus qu'une observation ignorée.
+
+Quand l'observateur ne peut pas distinguer deux trains de même type et de même
+sens (le cas depuis la passerelle), le client **ne désigne pas** : mieux vaut
+un rattachement que le serveur refuse qu'un rattachement confiant et faux.
+C'est pourquoi « Il passe ! » n'envoie pas de `trip_id`, là où la carte
+différée — qui nomme le train à l'écran — le fait.
 
 `id` identifie la ligne enregistrée, y compris quand `ambiguous` est vrai —
 l'observation est toujours conservée, seul son rattachement à une circulation
@@ -222,17 +243,33 @@ sont pas négociables en v0 :
    moment du passage = `seen`, `observed_at = maintenant`, `precision_s = 3`.
    C'est la donnée la plus précise qu'un humain puisse fournir.
 2. **Après** `when + uncertainty_s + 90 s`, si aucun appui n'a eu lieu, une
-   carte discrète apparaît : « Le train de 22:47 est-il passé ? »
-   - « Oui » → `seen`, `observed_at = when` prédit, `precision_s = 60`
-     (réponse ancrée sur l'heure affichée : on l'enregistre, mais avec une
-     précision qui dit sa faiblesse).
-   - « Non / pas vu » → ouvre la bottom sheet : soit une heure réelle
-     (`precision_s = 30`), soit « non passé » (`seen: false`).
-   - Ignorer la carte = **aucune donnée**. Une non-réponse n'est jamais un
-     succès.
-3. La carte concerne le dernier passage écoulé uniquement, et disparaît
-   d'elle-même après 10 minutes.
-4. **Toute observation envoyée reste réversible quelques secondes.** Un appui
+   carte discrète apparaît : « Train annoncé à 22:47 — tu l'as vu passer ? »,
+   avec l'identité du train dessous (catégorie, destination), sans quoi on ne
+   peut pas savoir de quelle circulation la carte parle.
+   - « Oui, à… » → **n'envoie rien** : ouvre la saisie de l'heure, champ
+     **vide**, et c'est la saisie qui enregistre (`precision_s = 30`,
+     `source = app:heure-saisie`, désignée par `trip_id`).
+   - « Non, rien vu » → `seen: false` directement, sans détour par la saisie :
+     une absence de passage n'a pas d'heure à saisir.
+   - « Je ne sais plus » → **aucune donnée**, et la question est close.
+   - Ignorer la carte = **aucune donnée** non plus ; elle expire seule.
+3. **Aucun bouton n'écrit une heure que l'observateur n'a pas dite.** Deux
+   pré-remplissages sont explicitement interdits, chacun pour une raison
+   différente :
+   - l'heure **prédite** — la valider donne un écart nul *par construction*,
+     et écrase la mesure réelle (constaté : le 15/09, un train vu 30 s en
+     avance enregistré à `ecart_s = 0.0`) ;
+   - l'heure **courante** — la carte peut arriver dix minutes après le
+     passage, donc « maintenant » n'est pas « quand il est passé ».
+
+   La seule exception est le bouton « Je n'ai pas noté l'heure » de la saisie,
+   qui envoie bien l'heure prédite mais sous `source = app:confirmation` : le
+   recalage l'écarte (voir `NON_TIMING_SOURCES`), elle ne sert qu'à attester
+   que la circulation a eu lieu.
+4. La carte concerne le dernier passage écoulé uniquement, et disparaît
+   d'elle-même après 10 minutes. Refermer la saisie d'un glissement sans
+   répondre **ramène la carte** : un geste d'échappement ne répond pas.
+5. **Toute observation envoyée reste réversible quelques secondes.** Un appui
    accidentel est une source d'erreur réelle (constatée : un « Il passe ! »
    pressé par erreur en testant l'app), et il n'y a aucun moyen de distinguer
    côté serveur une vraie observation d'un test. Le toast de confirmation porte

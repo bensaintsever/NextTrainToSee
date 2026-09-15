@@ -8,7 +8,7 @@
  * référence).
  */
 
-const CACHE_NAME = 'nexttraintosee-static-v2';
+const CACHE_NAME = 'nexttraintosee-static-v3';
 const STATIC_FILES = [
   './',
   'index.html',

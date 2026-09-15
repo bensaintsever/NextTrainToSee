@@ -62,6 +62,7 @@ const scheduled = new Set();
 let offlineTimer = null;
 let confirmAutoHideTimer = null;
 let currentConfirmPassage = null;
+let currentConfirmExpireAt = 0;
 let pendingManualPassage = null;
 
 let histoData = null;
@@ -334,9 +335,17 @@ function renderSky() {
   const lookPhrase = LOOK_PHRASES[p.look] || '';
   direction.textContent = `${p.direction_label} · ${lookPhrase}`;
 
+  trainInfo.textContent = describeTrain(p);
+}
+
+/** Identite lisible d'un passage : categorie en clair, jamais l'identifiant
+ *  brut. Partagee par la zone haute et la carte de confirmation differee, pour
+ *  que le train nomme par la carte soit reconnaissable comme celui qui etait
+ *  annonce a l'ecran. */
+function describeTrain(p) {
   const cat = CATEGORY_LABELS[p.category_id] || (p.category_id || '').toUpperCase();
   const bits = [cat, p.headsign].filter(Boolean).join(' ');
-  trainInfo.textContent = [bits, p.route_label || p.branch_label].filter(Boolean).join(' · ');
+  return [bits, p.route_label || p.branch_label].filter(Boolean).join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -506,77 +515,126 @@ function scheduleConfirmation(p) {
 
 const confirmCardEl = document.getElementById('confirm-card');
 const confirmTextEl = document.getElementById('confirm-text');
+const confirmTrainEl = document.getElementById('confirm-train');
 
+/* La carte différée rattrape un passage qu'on n'a pas signalé sur le moment.
+ * Elle ne dispose d'aucune mesure : elle arrive jusqu'à dix minutes après le
+ * passage, et la seule chose que l'observateur puisse encore fournir est une
+ * heure de mémoire. Aucun de ses boutons n'a donc le droit d'écrire une heure
+ * que l'observateur n'a pas dite — ce que faisait l'ancien « Oui », qui
+ * enregistrait l'heure *prédite* et rendait le résidu nul par construction.
+ */
 function showConfirmCard(p, expireAt) {
   if (acknowledged.has(p.trip_id)) return;
   currentConfirmPassage = p;
-  confirmTextEl.textContent = `Le train de ${fmtHM(p.when)} est-il passé ?`;
+  currentConfirmExpireAt = expireAt;
+  confirmTextEl.textContent = `Train annoncé à ${fmtHM(p.when)} — tu l'as vu passer ?`;
+  confirmTrainEl.textContent = describeTrain(p);
   confirmCardEl.hidden = false;
   requestAnimationFrame(() => confirmCardEl.classList.add('show'));
 
   clearTimeout(confirmAutoHideTimer);
   const remain = Math.max(0, expireAt - Date.now());
   confirmAutoHideTimer = setTimeout(() => {
-    // Ignorée pendant 10 minutes : disparaît sans rien envoyer.
+    // Ignorée jusqu'à l'expiration : disparaît sans rien envoyer.
+    currentConfirmPassage = null;
     hideConfirmCard();
   }, remain);
 }
 
 function hideConfirmCard() {
   clearTimeout(confirmAutoHideTimer);
+  currentConfirmPassage = null;
   confirmCardEl.classList.remove('show');
   setTimeout(() => { confirmCardEl.hidden = true; }, 250);
 }
 
-async function onConfirmYes() {
+/** « Oui, à… » — n'envoie rien : ouvre la saisie de l'heure. Le seul chemin
+ *  qui enregistre un passage vu est celui où l'observateur a dit à quelle
+ *  heure il l'a vu. */
+function onConfirmYes() {
   const p = currentConfirmPassage;
   if (!p) return;
+  currentConfirmPassage = null;
+  pendingManualPassage = p;
+  hideConfirmCard();
+  openManualSheet(p);
+}
+
+/** « Non, rien vu » — répond littéralement à la question posée, et va
+ *  directement au bout : une absence de passage n'a pas d'heure à saisir.
+ *  (L'ancien « Non » ouvrait la saisie d'heure, ce que rien dans son libellé
+ *  ne laissait deviner.) */
+async function onConfirmNo() {
+  const p = currentConfirmPassage;
+  if (!p) return;
+  currentConfirmPassage = null;
   acknowledged.add(p.trip_id);
   hideConfirmCard();
   try {
     const res = await postObserve({
-      seen: true, observed_at: p.when, precision_s: 60, source: 'app:confirmation',
-      trip_id: p.trip_id,
+      seen: false, anchor: p.when, source: 'app:non-passe', trip_id: p.trip_id,
     });
     const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    showToast(res.recorded ? '✓ Merci, c\'est noté' : '✓ Réponse envoyée', undo);
+    showToast("✓ Noté : ce train n'est pas passé", undo);
   } catch (err) {
     showToast('📡 Hors-ligne : réponse non envoyée');
   }
 }
 
-function onConfirmNo() {
+/** « Je ne sais plus » — la sortie honnête. N'écrit rien, et clot la
+ *  question pour de bon. Sans elle, une carte à deux boutons qui écrivent tous
+ *  les deux force à inventer une réponse pour s'en débarrasser. */
+function onConfirmSkip() {
   const p = currentConfirmPassage;
-  if (!p) return;
-  pendingManualPassage = p;
+  currentConfirmPassage = null;
+  if (p) acknowledged.add(p.trip_id);
   hideConfirmCard();
-  prefillManualTime();
-  openSheet(manualSheetEl, manualBackdropEl);
-}
-
-/** Pré-remplit le champ heure avec l'heure courante au moment de l'OUVERTURE
- *  de la sheet (pas au chargement de la page) : c'est la meilleure estimation
- *  par défaut quand on répond « Non », l'utilisateur n'a plus qu'à l'ajuster. */
-function prefillManualTime() {
-  const now = new Date();
-  manualTimeInput.value = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }
 
 // ---------------------------------------------------------------------------
-// Bottom sheet : précision manuelle (heure réelle ou « non passé »)
+// Bottom sheet : l'heure réellement observée
 // ---------------------------------------------------------------------------
 
 const manualSheetEl = document.getElementById('manual-sheet');
 const manualBackdropEl = document.getElementById('manual-backdrop');
 const manualTimeInput = document.getElementById('manual-time');
+const manualNoteEl = document.getElementById('manual-note');
+
+/** Ouvre la saisie avec un champ **vide**.
+ *
+ *  Ni « maintenant » — la carte peut arriver dix minutes après le passage,
+ *  et valider le pré-remplissage enregistrerait silencieusement une heure
+ *  fausse — ni l'heure prédite, qui donnerait un écart nul par construction.
+ *  Un champ vide coûte trois secondes de saisie ; les deux autres options
+ *  coûtent la mesure. */
+function openManualSheet(p) {
+  manualTimeInput.value = '';
+  manualNoteEl.textContent = `${describeTrain(p)} · annoncé à ${fmtHMS(p.when)}`;
+  openSheet(manualSheetEl, manualBackdropEl);
+}
+
+/** Reconstruit l'instant observé à partir d'une heure saisie sans date.
+ *
+ *  La date de référence est celle du passage annoncé, pas celle du jour
+ *  courant : un train annoncé à 00:05 et vu à 23:58 est passé la veille, et
+ *  l'attacher au jour de l'annonce le décalerait de vingt-quatre heures. */
+function resolveObservedTime(hhmmss, reference) {
+  const [h, m, sec] = hhmmss.split(':').map(Number);
+  const ref = new Date(reference);
+  let observed = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), h, m, sec || 0, 0);
+  const dayMs = 86_400_000;
+  if (observed - ref > dayMs / 2) observed = new Date(observed - dayMs);
+  else if (ref - observed > dayMs / 2) observed = new Date(observed.getTime() + dayMs);
+  return observed;
+}
 
 async function onManualSubmit() {
   const p = pendingManualPassage;
   if (!p || !manualTimeInput.value) return;
-  const [h, m, s] = manualTimeInput.value.split(':').map(Number);
-  const ref = new Date(p.when);
-  const observed = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), h, m, s || 0, 0);
+  const observed = resolveObservedTime(manualTimeInput.value, Date.parse(p.when));
 
+  pendingManualPassage = null;
   acknowledged.add(p.trip_id);
   closeSheet(manualSheetEl, manualBackdropEl);
   try {
@@ -585,24 +643,50 @@ async function onManualSubmit() {
       source: 'app:heure-saisie', trip_id: p.trip_id,
     });
     const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    showToast(res.recorded ? '✓ Heure enregistrée' : '✓ Réponse envoyée', undo);
+    // Nommer l'écart mesuré : c'est la seule façon de voir tout de suite qu'on
+    // s'est trompé d'heure ou de train, pendant qu'« Annuler » est encore là.
+    if (res.recorded && typeof res.gap_s === 'number') {
+      const gap = Math.round(res.gap_s);
+      const signe = gap > 0 ? '+' : '';
+      showToast(`✓ Enregistré · ${signe}${gap} s vs annonce`, undo);
+    } else {
+      showToast('✓ Heure enregistrée', undo);
+    }
   } catch (err) {
     showToast('📡 Hors-ligne : réponse non envoyée');
   }
 }
 
-async function onManualNotPassed() {
+/** « Je n'ai pas noté l'heure » — le seul chemin qui envoie encore l'heure
+ *  prédite, et il le dit. C'est une observation de *présence* : elle atteste
+ *  que le train a circulé, elle ne mesure aucun retard. Le serveur la range
+ *  dans NON_TIMING_SOURCES et l'écarte du recalage (voir observation.py). */
+async function onManualUnknown() {
   const p = pendingManualPassage;
   if (!p) return;
+  pendingManualPassage = null;
   acknowledged.add(p.trip_id);
   closeSheet(manualSheetEl, manualBackdropEl);
   try {
-    const res = await postObserve({ seen: false, anchor: p.when, source: 'app' });
+    const res = await postObserve({
+      seen: true, observed_at: p.when, precision_s: 300,
+      source: 'app:confirmation', trip_id: p.trip_id,
+    });
     const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    showToast(res.recorded ? '✓ Noté : non passé' : '✓ Réponse envoyée', undo);
+    showToast('✓ Noté : il a circulé (heure non mesurée)', undo);
   } catch (err) {
     showToast('📡 Hors-ligne : réponse non envoyée');
   }
+}
+
+/** Feuille refermée d'un glissement, sans réponse : la question n'a pas été
+ *  traitée, donc la carte revient tant que sa fenêtre court. Un geste
+ *  d'échappement ne doit ni écrire ni faire disparaître la question. */
+function onManualDismissed() {
+  const p = pendingManualPassage;
+  if (!p || acknowledged.has(p.trip_id)) return;
+  pendingManualPassage = null;
+  if (Date.now() < currentConfirmExpireAt) showConfirmCard(p, currentConfirmExpireAt);
 }
 
 // ---------------------------------------------------------------------------
@@ -639,8 +723,9 @@ function closeSheet(sheetEl, backdropEl) {
  *  la feuille ferait concurrence au défilement de son contenu (l'histogramme
  *  compte jusqu'à dix-huit lignes), l'un des deux perdant systématiquement en
  *  fluidité. */
-function wireDragToClose(sheetEl, backdropEl, handleEl) {
+function wireDragToClose(sheetEl, backdropEl, handleEl, onDismiss = null) {
   const grabZones = [handleEl, sheetEl.querySelector('.sheet-title')].filter(Boolean);
+  const dismiss = () => { closeSheet(sheetEl, backdropEl); onDismiss?.(); };
 
   let startY = null;
   let dragging = false;
@@ -678,7 +763,7 @@ function wireDragToClose(sheetEl, backdropEl, handleEl) {
     sheetEl.style.transform = '';
     startY = null;
     pendingDy = null;
-    if (dy > 70) closeSheet(sheetEl, backdropEl);
+    if (dy > 70) dismiss();
   };
 
   for (const zone of grabZones) {
@@ -690,7 +775,7 @@ function wireDragToClose(sheetEl, backdropEl, handleEl) {
   sheetEl.addEventListener('pointercancel', onUp);
 
   // Toucher hors zone : le fond assombri ferme la feuille.
-  backdropEl.addEventListener('click', () => closeSheet(sheetEl, backdropEl));
+  backdropEl.addEventListener('click', dismiss);
 }
 
 // ---------------------------------------------------------------------------
@@ -822,10 +907,12 @@ document.getElementById('btn-seen').addEventListener('click', onSeenClick);
 document.getElementById('btn-histo').addEventListener('click', openHistogram);
 document.getElementById('confirm-yes').addEventListener('click', onConfirmYes);
 document.getElementById('confirm-no').addEventListener('click', onConfirmNo);
+document.getElementById('confirm-skip').addEventListener('click', onConfirmSkip);
 document.getElementById('manual-submit').addEventListener('click', onManualSubmit);
-document.getElementById('manual-not-passed').addEventListener('click', onManualNotPassed);
+document.getElementById('manual-unknown').addEventListener('click', onManualUnknown);
 
-wireDragToClose(manualSheetEl, manualBackdropEl, document.getElementById('manual-handle'));
+wireDragToClose(manualSheetEl, manualBackdropEl, document.getElementById('manual-handle'),
+                onManualDismissed);
 wireDragToClose(histoSheetEl, histoBackdropEl, document.getElementById('histo-handle'));
 
 // ---------------------------------------------------------------------------

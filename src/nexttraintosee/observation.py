@@ -22,12 +22,16 @@ from enum import Enum
 
 #: Sources dont l'heure rapportée n'est pas une mesure.
 #:
-#: La carte de confirmation différée de l'application demande « le train de
-#: 17:45 est-il passé ? ». Une réponse affirmative enregistre l'heure *prédite*
-#: comme heure observée : le résidu vaut zéro par construction, quelle que soit
-#: la réalité. C'est une observation de présence, pas de temps — utile pour
-#: mesurer la couverture, trompeuse pour recaler le modèle, qu'elle tire
-#: silencieusement vers un biais nul.
+#: Un observateur qui confirme, plusieurs minutes après coup, qu'un train a bien
+#: circulé ne dit rien de l'heure : l'application n'a alors que l'heure
+#: *prédite* à enregistrer, et le résidu vaut zéro par construction, quelle que
+#: soit la réalité. C'est une observation de présence, pas de temps — utile pour
+#: mesurer la couverture et repérer une suppression, trompeuse pour recaler le
+#: modèle, qu'elle tire silencieusement vers un biais nul.
+#:
+#: L'application ne produit cette source que par un bouton qui l'annonce
+#: (« Je n'ai pas noté l'heure ») ; tout chemin qui prétend mesurer une heure
+#: doit en demander une à l'observateur.
 NON_TIMING_SOURCES = frozenset({"app:confirmation"})
 
 

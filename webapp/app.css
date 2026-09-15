@@ -346,9 +346,13 @@ body.night .bg {
   transform: translateY(12px);
   opacity: 0;
   transition: transform .25s ease, opacity .25s ease;
+  /* Le fondu de sortie dure 250 ms pendant lesquelles `hidden` n'est pas
+     encore posé : sans cela la carte reste cliquable une fois invisible, et
+     un second appui repart sur un passage déjà traité. */
+  pointer-events: none;
 }
 
-.confirm-card.show { transform: translateY(0); opacity: 1; }
+.confirm-card.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
 
 .confirm-text {
   font-size: .55rem;
@@ -356,10 +360,56 @@ body.night .bg {
   text-shadow: var(--shadow-hard);
 }
 
+.confirm-train {
+  font-size: .45rem;
+  margin: -6px 0 12px;
+  opacity: .72;
+  text-shadow: var(--shadow-hard);
+}
+
 .confirm-actions {
   display: flex;
   gap: 12px;
   justify-content: center;
+}
+
+/* Troisième issue de la carte : sortir sans rien écrire. Volontairement en
+   retrait — c'est une échappatoire, pas une réponse — mais présente, parce
+   qu'une carte à deux boutons qui écrivent tous les deux force la main. */
+.link-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px;
+  min-height: 36px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: .45rem;
+  color: var(--text);
+  opacity: .6;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.link-btn:active { opacity: 1; }
+
+/* Action secondaire neutre : ni destructrice (btn-secondary, rougeâtre) ni
+   principale. Sert à « Je n'ai pas noté l'heure », qui n'est pas un refus. */
+.btn-ghost {
+  background: rgba(255, 255, 255, .07);
+  border-color: rgba(255, 255, 255, .3);
+  opacity: .85;
+}
+
+/* Rappel du passage concerné, sous le titre d'une feuille. */
+.sheet-note {
+  font-size: .45rem;
+  text-align: center;
+  opacity: .72;
+  margin: -10px 0 16px;
 }
 
 /* Bottom sheets (précision manuelle, histogramme) */
