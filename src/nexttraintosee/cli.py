@@ -33,7 +33,7 @@ from .realtime import RealtimeError, empty_snapshot, load_snapshot
 from .sensor.base import PassageDetector
 from .sensor.replay import read_levels
 from .sensor.session import Status, listen_session
-from .observation import Observation, ObservationKind, from_detection
+from .observation import Observation, ObservationKind, from_detection, times_the_passage
 from .server import DEFAULT_WEBAPP_DIR, create_server
 from .service import PassageService, resolve_binding
 from .store import Store
@@ -559,7 +559,10 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         passages = store.passages_between(config.site.name, start, end, config.site.branches)
 
     # Capteur et rapports humains sont la même donnée : un instant de passage.
-    seen = [o for o in reported if o.kind is ObservationKind.SEEN]
+    # Sauf ceux dont l'heure n'en est pas une — voir NON_TIMING_SOURCES.
+    seen_all = [o for o in reported if o.kind is ObservationKind.SEEN]
+    seen = [o for o in seen_all if times_the_passage(o)]
+    echoes = len(seen_all) - len(seen)
     observations = [from_detection(d) for d in detections] + seen
     missed = [o for o in reported if o.kind is ObservationKind.NOT_SEEN]
 
@@ -578,6 +581,12 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         f"Sur {args.days} jour(s) : {len(detections)} détections de capteur, "
         f"{len(seen)} rapports, {len(missed)} passages signalés absents"
     )
+    if echoes:
+        print(
+            f"  {echoes} réponse(s) à une carte de confirmation écartée(s) : elles\n"
+            "  reprennent l'heure prédite comme heure observée, donc un écart nul\n"
+            "  quelle que soit la réalité. Préférez le bouton au moment du passage."
+        )
     print(f"{result.summary()}\n")
 
     if result.matches:

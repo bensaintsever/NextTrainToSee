@@ -20,6 +20,22 @@ from datetime import datetime
 from enum import Enum
 
 
+#: Sources dont l'heure rapportée n'est pas une mesure.
+#:
+#: La carte de confirmation différée de l'application demande « le train de
+#: 17:45 est-il passé ? ». Une réponse affirmative enregistre l'heure *prédite*
+#: comme heure observée : le résidu vaut zéro par construction, quelle que soit
+#: la réalité. C'est une observation de présence, pas de temps — utile pour
+#: mesurer la couverture, trompeuse pour recaler le modèle, qu'elle tire
+#: silencieusement vers un biais nul.
+NON_TIMING_SOURCES = frozenset({"app:confirmation"})
+
+
+def times_the_passage(observation: "Observation") -> bool:
+    """Vrai si l'heure rapportée par cette observation mesure quelque chose."""
+    return observation.source not in NON_TIMING_SOURCES
+
+
 class ObservationKind(str, Enum):
     """Ce que l'observateur rapporte."""
 

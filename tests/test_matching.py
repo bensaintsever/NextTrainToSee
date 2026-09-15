@@ -368,3 +368,22 @@ def test_a_designation_pointing_nowhere_leaves_the_observation_unmatched():
     result = match_observations([designated(0, "inconnu")], [passage(0, trip_id="autre")])
     assert result.matches == []
     assert len(result.unmatched_detections) == 1
+
+
+def test_a_confirmation_answer_is_not_a_timing_measurement():
+    # La carte de confirmation différée enregistre l'heure prédite comme heure
+    # observée : le résidu vaut zéro quoi qu'il arrive. Vécu le 15 septembre —
+    # un passage réellement en avance de 30 s a été consigné « à l'heure »,
+    # détruisant la seule mesure de la soirée.
+    from nexttraintosee.observation import Observation, ObservationKind, times_the_passage
+
+    def report(source):
+        return Observation(
+            observed_at=NOON, kind=ObservationKind.SEEN, source=source, precision_s=60.0
+        )
+
+    assert times_the_passage(report("app:bouton")) is True
+    assert times_the_passage(report("app:heure-saisie")) is True
+    assert times_the_passage(report("manuel")) is True
+    assert times_the_passage(report("capteur")) is True
+    assert times_the_passage(report("app:confirmation")) is False
