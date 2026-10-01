@@ -77,15 +77,15 @@ body.night .bg {
 }
 
 /* Zone haute — le ciel dégagé + le haut du tunnel : calme sur l'illustration,
-   jamais jusqu'au nez du train. Quatre niveaux : badges → heure+incertitude →
-   compte à rebours → direction. Espacements resserrés pour tenir en ~164 px
-   (retour utilisateur : l'illustration doit se voir derrière), sans hauteur
-   fixe, qui couperait une direction passée sur deux lignes.
+   jamais jusqu'au nez du train. Quatre niveaux, aérés (§ retour utilisateur
+   « trop serré ») : badges → heure+incertitude → compte à rebours → direction.
    Marge latérale plus généreuse que les autres zones (retour utilisateur :
    « laisser de l'espace sur les côtés ») — c'est le bloc le plus large,
    l'heure géante tend à occuper toute la largeur disponible. */
+/* Descendue de 164 px (retour utilisateur) : le ciel et les toits restent
+   visibles au-dessus du panneau. */
 .zone--sky {
-  top: 0;
+  top: 164px;
   padding-top: calc(env(safe-area-inset-top) + 14px);
   padding-left: max(28px, env(safe-area-inset-left));
   padding-right: max(28px, env(safe-area-inset-right));
@@ -141,7 +141,7 @@ body.night .bg {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  margin-top: 6px;
+  margin-top: 12px;
 }
 
 .big-time {
@@ -163,7 +163,7 @@ body.night .bg {
   color: var(--accent);
   text-shadow: var(--shadow-hard);
   min-height: 1.2em;
-  margin-top: 12px;
+  margin-top: 22px;
   letter-spacing: .5px;
 }
 
@@ -172,7 +172,7 @@ body.night .bg {
   font-size: .6rem;
   text-shadow: var(--shadow-hard);
   line-height: 1.6;
-  margin-top: 10px;
+  margin-top: 18px;
 }
 
 .train-info {
@@ -194,11 +194,6 @@ body.night .bg {
 @keyframes pulse-discreet {
   0%, 100% { opacity: 1; }
   50% { opacity: .78; }
-}
-
-.sky-panel {
-  padding-top: 12px;
-  padding-bottom: 12px;
 }
 
 .next-panel {
