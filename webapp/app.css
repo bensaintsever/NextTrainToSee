@@ -239,13 +239,6 @@ body.night .bg {
   filter: drop-shadow(0 1px 0 #000);
 }
 
-.btn-seen {
-  background: rgba(46, 92, 58, .72);
-  border-color: rgba(143, 227, 143, .7);
-  padding: 12px 22px;
-  font-size: .65rem;
-}
-
 .btn-histo {
   padding: 12px 16px;
 }
@@ -253,13 +246,6 @@ body.night .bg {
 .btn-icon--solo {
   width: 18px;
   height: 18px;
-}
-
-.btn-small { font-size: .55rem; padding: 9px 14px; }
-
-.btn-secondary {
-  background: rgba(60, 30, 30, .55);
-  border-color: rgba(255, 150, 150, .5);
 }
 
 /* Bandeau d'état dégradé : discret, en haut, au-dessus de tout. */
@@ -279,140 +265,7 @@ body.night .bg {
 
 .banner.theoretical { background: rgba(120, 90, 10, .75); }
 
-/* Toast de confirmation d'observation */
-.toast {
-  position: fixed;
-  left: 8%;
-  right: 8%;
-  bottom: calc(env(safe-area-inset-bottom) + 112px);
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--panel-bg-strong);
-  border: 1px solid var(--panel-border);
-  border-radius: 18px;
-  padding: 12px 16px;
-  font-size: .55rem;
-  text-shadow: var(--shadow-hard);
-  backdrop-filter: blur(12px) saturate(1.15);
-  -webkit-backdrop-filter: blur(12px) saturate(1.15);
-  box-shadow: var(--panel-lift);
-  opacity: 0;
-  transition: opacity .25s ease;
-  pointer-events: none;
-}
-
-.toast.show { opacity: 1; pointer-events: auto; }
-
-.toast-text { text-align: center; }
-
-/* Avec une action (« Annuler ») : le texte se cale à gauche, le bouton reste
-   toujours visible à droite plutôt que de se faire pousser hors du cadre. */
-.toast.with-action { justify-content: space-between; }
-.toast.with-action .toast-text { text-align: left; flex: 1; }
-
-.toast-action {
-  flex-shrink: 0;
-  min-height: 32px;
-  padding: 6px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: rgba(255, 209, 102, .12);
-  color: var(--accent);
-  font-family: inherit;
-  font-size: .55rem;
-  text-shadow: none;
-}
-
-.toast-action:active { background: rgba(255, 209, 102, .28); }
-
-/* Carte de confirmation différée */
-.confirm-card {
-  position: fixed;
-  left: 6%;
-  right: 6%;
-  bottom: calc(env(safe-area-inset-bottom) + 112px);
-  z-index: 24;
-  background: var(--panel-bg-strong);
-  border: 1px solid rgba(255, 209, 102, .5);
-  border-radius: 20px;
-  padding: 16px;
-  text-align: center;
-  backdrop-filter: blur(12px) saturate(1.15);
-  -webkit-backdrop-filter: blur(12px) saturate(1.15);
-  box-shadow: var(--panel-lift);
-  transform: translateY(12px);
-  opacity: 0;
-  transition: transform .25s ease, opacity .25s ease;
-  /* Le fondu de sortie dure 250 ms pendant lesquelles `hidden` n'est pas
-     encore posé : sans cela la carte reste cliquable une fois invisible, et
-     un second appui repart sur un passage déjà traité. */
-  pointer-events: none;
-}
-
-.confirm-card.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
-
-.confirm-text {
-  font-size: .55rem;
-  margin: 0 0 12px;
-  text-shadow: var(--shadow-hard);
-}
-
-.confirm-train {
-  font-size: .45rem;
-  margin: -6px 0 12px;
-  opacity: .72;
-  text-shadow: var(--shadow-hard);
-}
-
-.confirm-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-}
-
-/* Troisième issue de la carte : sortir sans rien écrire. Volontairement en
-   retrait — c'est une échappatoire, pas une réponse — mais présente, parce
-   qu'une carte à deux boutons qui écrivent tous les deux force la main. */
-.link-btn {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  padding: 8px;
-  min-height: 36px;
-  border: none;
-  background: none;
-  font-family: inherit;
-  font-size: .45rem;
-  color: var(--text);
-  opacity: .6;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.link-btn:active { opacity: 1; }
-
-/* Action secondaire neutre : ni destructrice (btn-secondary, rougeâtre) ni
-   principale. Sert à « Je n'ai pas noté l'heure », qui n'est pas un refus. */
-.btn-ghost {
-  background: rgba(255, 255, 255, .07);
-  border-color: rgba(255, 255, 255, .3);
-  opacity: .85;
-}
-
-/* Rappel du passage concerné, sous le titre d'une feuille. */
-.sheet-note {
-  font-size: .45rem;
-  text-align: center;
-  opacity: .72;
-  margin: -10px 0 16px;
-}
-
-/* Bottom sheets (précision manuelle, histogramme) */
+/* Bottom sheet (histogramme) */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
@@ -432,7 +285,7 @@ body.night .bg {
   right: max(14px, env(safe-area-inset-right));
   bottom: 0;
   z-index: 31;
-  /* Même matériau de verre que les panneaux et le toast (--panel-bg-strong) :
+  /* Même matériau de verre que les panneaux (--panel-bg-strong) :
      la feuille se lit comme le reste de l'application, pas comme un panneau
      à part. Un peu plus opaque que les petits panneaux du haut, pour rester
      lisible même quand la portion d'image derrière elle est claire. */
@@ -471,30 +324,6 @@ body.night .bg {
   font-size: .65rem;
   margin: 0 0 16px;
   text-align: center;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: .55rem;
-  margin-bottom: 16px;
-}
-
-.field input[type="time"] {
-  font-family: inherit;
-  font-size: .8rem;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, .35);
-  background: #0e1822;
-  color: var(--text);
-  min-height: 44px;
-}
-
-#manual-sheet .btn, #manual-sheet button {
-  width: 100%;
-  margin-bottom: 10px;
 }
 
 .tabs {

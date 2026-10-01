@@ -6,6 +6,7 @@ import argparse
 import csv
 import errno
 import importlib
+import json
 import logging
 import socket
 import sys
@@ -15,6 +16,7 @@ from pathlib import Path
 
 from .config import AppConfig, ConfigError, load_config
 from .coverage import analyse, summarise_delays
+from .export import DEFAULT_EXPORT_DAYS, build_timetable
 from .geo import bearing_distance_deg, initial_bearing_deg
 from .gtfs import GtfsError, GtfsFeed
 from .matching import calibrate, fit_line_speed_kmh, fit_profile, match_observations, runs_from_matches
@@ -1095,6 +1097,31 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Écrit les passages prédits en JSON statique, pour la PWA sans serveur."""
+    config = _load(args)
+    try:
+        feed = _open_feed(config)
+    except GtfsError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    now = datetime.now().astimezone()
+    timetable = build_timetable(
+        feed, config.site, now.date(), days=args.days, generated_at=now
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    # Compact : le fichier est téléchargé par le téléphone, parfois en 4G.
+    args.output.write_text(
+        json.dumps(timetable, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    )
+    print(
+        f"{len(timetable['passages'])} passages du {timetable['first_day']} "
+        f"au {timetable['last_day']} → {args.output}"
+    )
+    return 0
+
+
 # -- point d'entrée ----------------------------------------------------------
 
 
@@ -1268,6 +1295,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="dossier statique à servir (par défaut : webapp/ du dépôt)",
     )
     serving.set_defaults(func=cmd_serve)
+
+    exporting = subparsers.add_parser(
+        "export", help="écrire les passages prédits en JSON, pour la PWA publiée sans serveur"
+    )
+    exporting.add_argument(
+        "-o", "--output", type=Path, default=Path("webapp/timetable.json"),
+        help="fichier JSON à écrire",
+    )
+    exporting.add_argument(
+        "--days", type=int, default=DEFAULT_EXPORT_DAYS,
+        help="nombre de jours exportés à partir d'aujourd'hui",
+    )
+    exporting.set_defaults(func=cmd_export)
 
     return parser
 

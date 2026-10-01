@@ -1,0 +1,74 @@
+# Publie la PWA sur GitHub Pages, avec des horaires régénérés chaque nuit.
+#
+# L'application n'a plus de serveur : `nexttraintosee export` précalcule les
+# passages des jours à venir dans timetable.json, publié à côté de la page, et
+# le téléphone y ajoute lui-même le retard lu sur le flux temps réel SNCF.
+# L'export couvre une semaine : quelques nuits d'échec ne cassent rien.
+
+name: Publier la PWA
+
+on:
+  push:
+    branches: [claude/train-passage-prediction-5b168f]
+  schedule:
+    # Chaque nuit à 2 h 17 UTC — hors de l'heure pile, où GitHub met en file
+    # d'attente toutes les tâches planifiées en même temps.
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Les jours exportés sont des jours locaux : sans ce fuseau, l'export
+      # commencerait à la date UTC.
+      TZ: Europe/Paris
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer
+        run: python -m pip install -e ".[dev]"
+
+      - name: Tester
+        run: python -m pytest
+
+      - name: Télécharger les horaires SNCF
+        run: |
+          mkdir -p data
+          curl -fL --retry 3 -o data/sncf-gtfs.zip \
+            https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip
+
+      - name: Exporter les passages
+        run: |
+          mkdir -p _site
+          cp -R webapp/. _site/
+          nexttraintosee -c config/toulouse-guilhemery.toml export -o _site/timetable.json
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -2,10 +2,11 @@
 /*
  * NextTrainToSee — logique de la PWA.
  *
- * Rien n'est inféré côté client : le serveur donne tous les libellés
- * (direction_label, look, route_label…). Ce fichier se contente de les
- * afficher, de tenir un compte à rebours à la seconde, et d'appliquer la
- * procédure d'observation § 6 du document de référence à la lettre.
+ * Aucun serveur : timetable.json, régénéré chaque nuit par `nexttraintosee
+ * export` et publié avec l'app, donne tous les passages et tous les libellés
+ * (direction_label, look, route_label…). Le téléphone lit lui-même le retard
+ * sur le flux temps réel SNCF (realtime.js), et ce fichier se contente
+ * d'afficher le résultat et de tenir un compte à rebours à la seconde.
  */
 
 // ---------------------------------------------------------------------------
@@ -14,11 +15,18 @@
 
 const USE_MOCK = new URLSearchParams(location.search).get('mock') === '1';
 
-const POLL_MS = 30_000;        // /api/next toutes les 30 s
+const TIMETABLE_URL = 'timetable.json';
+// Flux SNCF « TripUpdates », relayé sans clé par transport.data.gouv.fr, qui
+// autorise l'appel direct depuis un navigateur (CORS ouvert).
+const REALTIME_URL = 'https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-trip-updates';
+const REALTIME_POLL_MS = 90_000;      // le flux n'est rafraîchi que toutes les ~2 min
+const TIMETABLE_POLL_MS = 60 * 60_000; // l'export change une fois par nuit
 const TICK_MS = 1_000;         // horloge locale à la seconde
 const IMMINENT_LEAD_MS = 30_000;      // état imminent dès announce_at - 30 s
-const CONFIRM_DELAY_MS = 90_000;      // carte après when + uncertainty + 90 s
-const CONFIRM_TTL_MS = 10 * 60_000;   // la carte s'efface après 10 min sans réponse
+const HORIZON_MS = 12 * 3600_000;     // fenêtre d'affichage des passages
+// Au-delà, l'export n'a pas été republié depuis plusieurs nuits : les
+// horaires restent justes jusqu'à épuisement, mais on le signale.
+const STALE_TIMETABLE_MS = 2 * 86_400_000;
 
 // Fenêtre nocturne : 18 h – 6 h, heure locale de l'appareil (retour
 // utilisateur). Aucune API ne la fournit — c'est un repère visuel, pas une
@@ -47,23 +55,14 @@ const CATEGORY_LABELS = {
   ic: 'IC',
 };
 
-// Dernière liste connue de passages (0, 1 ou 2 selon /api/next?limit=2).
+// Passages à venir, recalculés à chaque seconde depuis l'export et le dernier
+// relevé temps réel (0, 1 ou 2 : le prochain en grand, le suivant en bas).
 let passages = [];
-// Le passage actuellement affiché en grand (zone haute), conservé même après
-// sa disparition de la liste pour pouvoir déclencher la carte de confirmation.
-let trackedTop = null;
-// trip_id déjà « réglés » (bouton pressé ou carte répondue) : on ne les
-// re-demande jamais.
-const acknowledged = new Set();
-// trip_id pour lesquels une carte de confirmation a déjà été programmée,
-// pour ne jamais programmer deux fois le même minuteur.
-const scheduled = new Set();
-
-let offlineTimer = null;
-let confirmAutoHideTimer = null;
-let currentConfirmPassage = null;
-let currentConfirmExpireAt = 0;
-let pendingManualPassage = null;
+// Contenu de timetable.json, et dernier relevé temps réel décodé (null tant
+// qu'aucun n'a abouti, ou s'il est trop ancien pour être cru).
+let timetable = null;
+let realtime = null;
+let realtimeAt = 0;
 
 let histoData = null;
 let histoTab = 'weekday';
@@ -71,7 +70,7 @@ let histoLastTab = null; // dernier onglet rendu : détermine le sens du glissem
 
 // Décalage appliqué aux horaires de démonstration de assets/mock.json, fixé
 // une fois puis reconduit pour que la démo se déroule en temps réel (compte
-// à rebours, état imminent, carte de confirmation) plutôt que de rester figée
+// à rebours, état imminent, passage) plutôt que de rester figée
 // sur « dans 3 min ». Voir getMockData().
 let mockShift = null;
 let mockRaw = null;
@@ -82,8 +81,7 @@ let mockRaw = null;
 
 function pad(n, len = 2) { return String(n).padStart(len, '0'); }
 
-/** Formate une Date en ISO 8601 avec le décalage horaire local (requis par
- *  le contrat § 4 pour tout ce que le client envoie). */
+/** Formate une Date en ISO 8601 avec le décalage horaire local. */
 function toIsoLocal(d) {
   const tzMin = -d.getTimezoneOffset();
   const sign = tzMin >= 0 ? '+' : '-';
@@ -129,7 +127,7 @@ async function fetchJson(url, options) {
 
 /** Recalcule les horaires de la démo mock pour qu'ils restent proches de
  *  « maintenant » et rejouent tout le cycle (annonce → imminent → passage →
- *  carte de confirmation) au lieu de rester figés sur les valeurs figées
+ *  passage suivant) au lieu de rester figés sur les valeurs figées
  *  dans assets/mock.json. */
 function getMockData(raw) {
   const now = Date.now();
@@ -161,36 +159,63 @@ function getMockData(raw) {
   return data;
 }
 
-async function fetchNext() {
+async function loadTimetable() {
   try {
-    const data = await fetchJson('/api/next?limit=2');
-    setOffline(false);
-    handleNextData(data);
+    const data = await fetchJson(TIMETABLE_URL);
+    if (data.format !== 1) throw new Error(`format ${data.format} inconnu`);
+    timetable = data;
+    histoData = data.histogram;
   } catch (err) {
-    if (USE_MOCK) {
-      try {
-        if (!mockRaw) mockRaw = await fetchJson('assets/mock.json');
-        setOffline(false);
-        handleNextData(getMockData(mockRaw));
-        return;
-      } catch (err2) {
-        // Même le mock est indisponible : on retombe sur l'état hors-ligne.
-      }
-    }
-    setOffline(true);
+    // On garde l'export déjà chargé, s'il y en a un : il reste juste.
   }
+  refresh();
 }
 
-async function postObserve(body) {
-  return fetchJson('/api/observe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+async function loadRealtime() {
+  if (!timetable || document.visibilityState === 'hidden') return;
+  try {
+    const res = await fetch(REALTIME_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const feed = NextTrainRealtime.decodeFeed(new Uint8Array(await res.arrayBuffer()));
+    realtime = NextTrainRealtime.delaysAt(feed, timetable.anchor_stop_ids);
+    realtimeAt = Date.now();
+  } catch (err) {
+    // Panne du flux : repli sur l'horaire théorique, signalé par le bandeau.
+  }
+  refresh();
+}
+
+/** Un relevé temps réel n'est cru que tant qu'il est récent : après une mise
+ *  en veille, mieux vaut l'horaire théorique qu'un retard d'il y a une heure. */
+function freshRealtime() {
+  return realtime && Date.now() - realtimeAt < 3 * REALTIME_POLL_MS ? realtime : null;
+}
+
+/** Recalcule la liste affichée : depuis l'export en usage réel, depuis
+ *  assets/mock.json en démonstration (?mock=1). */
+async function refresh() {
+  if (USE_MOCK) {
+    try {
+      if (!mockRaw) mockRaw = await fetchJson('assets/mock.json');
+      setOffline(false);
+      handleNextData(getMockData(mockRaw));
+    } catch (err) {
+      setOffline(true);
+    }
+    return;
+  }
+  if (!timetable) { setOffline(true); return; }
+  const live = freshRealtime();
+  setOffline(false);
+  handleNextData({
+    realtime: live !== null,
+    passages: NextTrainRealtime.upcomingPassages(timetable, live, Date.now(),
+                                                 { horizonMs: HORIZON_MS, limit: 2 }),
   });
 }
 
 // ---------------------------------------------------------------------------
-// Bandeau d'état dégradé (API muette / horaire théorique)
+// Bandeau d'état dégradé (horaires absents / périmés / théoriques)
 // ---------------------------------------------------------------------------
 
 const bannerEl = document.getElementById('banner');
@@ -203,10 +228,15 @@ function setOffline(v) {
 }
 
 function renderBanner() {
+  const stale = timetable && Date.now() - Date.parse(timetable.generated_at) > STALE_TIMETABLE_MS;
   if (isOffline) {
     bannerEl.hidden = false;
     bannerEl.classList.remove('theoretical');
-    bannerEl.textContent = '📡 Connexion au serveur perdue';
+    bannerEl.textContent = '📡 Horaires indisponibles';
+  } else if (stale) {
+    bannerEl.hidden = false;
+    bannerEl.classList.add('theoretical');
+    bannerEl.textContent = `⏱ Horaires du ${new Date(timetable.generated_at).toLocaleDateString('fr-FR')}`;
   } else if (lastRoot && lastRoot.realtime === false) {
     bannerEl.hidden = false;
     bannerEl.classList.add('theoretical');
@@ -230,25 +260,14 @@ function renderOfflinePlaceholders() {
 }
 
 // ---------------------------------------------------------------------------
-// Traitement de /api/next
+// Traitement d'une liste de passages
 // ---------------------------------------------------------------------------
 
 let lastRoot = null;
 
 function handleNextData(data) {
   lastRoot = data;
-  const list = data.passages || [];
-
-  // Le passage affiché en tête change : celui qu'on affichait avant vient de
-  // s'écouler (sorti de la fenêtre de 12 h) → on programme, s'il le faut, la
-  // carte de confirmation différée pour lui.
-  const newTop = list[0] || null;
-  if (trackedTop && (!newTop || newTop.trip_id !== trackedTop.trip_id)) {
-    scheduleConfirmation(trackedTop);
-  }
-  if (newTop) trackedTop = newTop;
-
-  passages = list;
+  passages = data.passages || [];
   renderBanner();
   renderSky();
   renderTrack();
@@ -338,10 +357,8 @@ function renderSky() {
   trainInfo.textContent = describeTrain(p);
 }
 
-/** Identite lisible d'un passage : categorie en clair, jamais l'identifiant
- *  brut. Partagee par la zone haute et la carte de confirmation differee, pour
- *  que le train nomme par la carte soit reconnaissable comme celui qui etait
- *  annonce a l'ecran. */
+/** Identité lisible d'un passage : catégorie en clair, jamais l'identifiant
+ *  brut. */
 function describeTrain(p) {
   const cat = CATEGORY_LABELS[p.category_id] || (p.category_id || '').toUpperCase();
   const bits = [cat, p.headsign].filter(Boolean).join(' ');
@@ -398,295 +415,10 @@ function applyDayNight() {
 
 function tick() {
   applyDayNight();
-  if (!isOffline) renderSky();
-}
-
-// ---------------------------------------------------------------------------
-// Observation — § 6, à la lettre
-// ---------------------------------------------------------------------------
-
-const toastEl = document.getElementById('toast');
-const toastTextEl = document.getElementById('toast-text');
-const toastActionEl = document.getElementById('toast-action');
-let toastTimer = null;
-
-// Une observation qui porte une action reste affichée plus longtemps : le
-// temps de lire, comprendre qu'on peut annuler, et le faire — 3,2 s suffit à
-// un message qui ne demande qu'à être lu, pas à celui qui appelle à agir.
-const TOAST_DEFAULT_MS = 3200;
-const TOAST_ACTION_MS = 6000;
-
-/** @param {string} text
- *  @param {{label: string, onClick: () => void} | null} [action] */
-function showToast(text, action = null) {
-  clearTimeout(toastTimer);
-  toastTextEl.textContent = text;
-  toastEl.classList.toggle('with-action', Boolean(action));
-
-  if (action) {
-    toastActionEl.hidden = false;
-    toastActionEl.disabled = false;
-    toastActionEl.textContent = action.label;
-    toastActionEl.onclick = () => {
-      // Synchrone, avant tout await : un second appui pendant l'annulation en
-      // cours ne doit pas déclencher une seconde suppression.
-      toastActionEl.disabled = true;
-      action.onClick();
-    };
-  } else {
-    toastActionEl.hidden = true;
-    toastActionEl.onclick = null;
-  }
-
-  toastEl.hidden = false;
-  requestAnimationFrame(() => toastEl.classList.add('show'));
-  toastTimer = setTimeout(() => {
-    toastEl.classList.remove('show');
-    setTimeout(() => { toastEl.hidden = true; }, 300);
-  }, action ? TOAST_ACTION_MS : TOAST_DEFAULT_MS);
-}
-
-/** Annule une observation envoyée par erreur (§ 6) : la seule protection
- *  contre un appui accidentel sur « Il passe ! », qu'aucun serveur ne peut
- *  distinguer d'une vraie observation une fois reçue. */
-async function undoObservation(id) {
-  try {
-    const res = await fetchJson(`/api/observe/${id}`, { method: 'DELETE' });
-    showToast(res.deleted ? '↩ Passage annulé' : '↩ Déjà annulé');
-  } catch (err) {
-    showToast('📡 Hors-ligne : annulation impossible');
-  }
-}
-
-// 1. Le bouton « Il passe ! » est l'instrument principal : appui → POST
-//    immédiat, seen=true, observed_at=maintenant, precision_s=3.
-async function onSeenClick() {
-  const observedAt = new Date();
-  // Volontairement SANS désignation. Depuis la passerelle, deux trains de même
-  // type et de même sens à quelques minutes d'intervalle sont indiscernables :
-  // l'appui dit honnêtement « un train vient de passer », pas « c'est celui
-  // que l'écran annonce ». Le serveur, qui voit tous les passages, est seul en
-  // mesure de juger si l'attribution est sûre — et refuse quand elle ne l'est
-  // pas, ce qui vaut mieux qu'un rattachement confiant et faux.
-  const body = { seen: true, observed_at: toIsoLocal(observedAt), precision_s: 3,
-                 source: 'app:bouton' };
-
-  // Un appui manuel règle d'office le passage actuellement suivi : plus
-  // question de le redemander via la carte différée.
-  if (trackedTop) acknowledged.add(trackedTop.trip_id);
-  hideConfirmCard();
-
-  try {
-    const res = await postObserve(body);
-    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    // L'observation est enregistrée dans tous les cas : ce qui varie, c'est
-    // qu'on sache ou non à quelle circulation la rattacher. Le message le dit,
-    // et nomme le train retenu pour qu'un rattachement douteux se voie.
-    if (res.ambiguous) {
-      showToast('✓ Noté — deux trains trop proches pour trancher', undo);
-    } else if (res.recorded && res.bound_to) {
-      const nom = res.bound_to.headsign ? ` ${res.bound_to.headsign}` : '';
-      showToast(`✓ Noté : ${fmtHM(res.bound_to.when)}${nom}`, undo);
-    } else {
-      showToast('✓ Noté — aucun passage annoncé à cette heure', undo);
-    }
-  } catch (err) {
-    showToast('📡 Hors-ligne : passage non envoyé');
-  }
-}
-
-// 2. Après when + uncertainty_s + 90 s sans appui : carte discrète.
-function scheduleConfirmation(p) {
-  if (!p || acknowledged.has(p.trip_id) || scheduled.has(p.trip_id)) return;
-  scheduled.add(p.trip_id);
-
-  const whenAt = Date.parse(p.when);
-  const endAt = whenAt + p.uncertainty_s * 1000;
-  const showAt = endAt + CONFIRM_DELAY_MS;
-  const expireAt = showAt + CONFIRM_TTL_MS;
-
-  const now = Date.now();
-  // Trop tard : la fenêtre de 10 minutes est déjà entièrement passée.
-  // Ignorer la carte = aucune donnée, jamais une invention.
-  if (now >= expireAt) return;
-
-  setTimeout(() => showConfirmCard(p, expireAt), Math.max(0, showAt - now));
-}
-
-const confirmCardEl = document.getElementById('confirm-card');
-const confirmTextEl = document.getElementById('confirm-text');
-const confirmTrainEl = document.getElementById('confirm-train');
-
-/* La carte différée rattrape un passage qu'on n'a pas signalé sur le moment.
- * Elle ne dispose d'aucune mesure : elle arrive jusqu'à dix minutes après le
- * passage, et la seule chose que l'observateur puisse encore fournir est une
- * heure de mémoire. Aucun de ses boutons n'a donc le droit d'écrire une heure
- * que l'observateur n'a pas dite — ce que faisait l'ancien « Oui », qui
- * enregistrait l'heure *prédite* et rendait le résidu nul par construction.
- */
-function showConfirmCard(p, expireAt) {
-  if (acknowledged.has(p.trip_id)) return;
-  currentConfirmPassage = p;
-  currentConfirmExpireAt = expireAt;
-  confirmTextEl.textContent = `Train annoncé à ${fmtHM(p.when)} — tu l'as vu passer ?`;
-  confirmTrainEl.textContent = describeTrain(p);
-  confirmCardEl.hidden = false;
-  requestAnimationFrame(() => confirmCardEl.classList.add('show'));
-
-  clearTimeout(confirmAutoHideTimer);
-  const remain = Math.max(0, expireAt - Date.now());
-  confirmAutoHideTimer = setTimeout(() => {
-    // Ignorée jusqu'à l'expiration : disparaît sans rien envoyer.
-    currentConfirmPassage = null;
-    hideConfirmCard();
-  }, remain);
-}
-
-function hideConfirmCard() {
-  clearTimeout(confirmAutoHideTimer);
-  currentConfirmPassage = null;
-  confirmCardEl.classList.remove('show');
-  setTimeout(() => { confirmCardEl.hidden = true; }, 250);
-}
-
-/** « Oui, à… » — n'envoie rien : ouvre la saisie de l'heure. Le seul chemin
- *  qui enregistre un passage vu est celui où l'observateur a dit à quelle
- *  heure il l'a vu. */
-function onConfirmYes() {
-  const p = currentConfirmPassage;
-  if (!p) return;
-  currentConfirmPassage = null;
-  pendingManualPassage = p;
-  hideConfirmCard();
-  openManualSheet(p);
-}
-
-/** « Non, rien vu » — répond littéralement à la question posée, et va
- *  directement au bout : une absence de passage n'a pas d'heure à saisir.
- *  (L'ancien « Non » ouvrait la saisie d'heure, ce que rien dans son libellé
- *  ne laissait deviner.) */
-async function onConfirmNo() {
-  const p = currentConfirmPassage;
-  if (!p) return;
-  currentConfirmPassage = null;
-  acknowledged.add(p.trip_id);
-  hideConfirmCard();
-  try {
-    const res = await postObserve({
-      seen: false, anchor: p.when, source: 'app:non-passe', trip_id: p.trip_id,
-    });
-    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    showToast("✓ Noté : ce train n'est pas passé", undo);
-  } catch (err) {
-    showToast('📡 Hors-ligne : réponse non envoyée');
-  }
-}
-
-/** « Je ne sais plus » — la sortie honnête. N'écrit rien, et clot la
- *  question pour de bon. Sans elle, une carte à deux boutons qui écrivent tous
- *  les deux force à inventer une réponse pour s'en débarrasser. */
-function onConfirmSkip() {
-  const p = currentConfirmPassage;
-  currentConfirmPassage = null;
-  if (p) acknowledged.add(p.trip_id);
-  hideConfirmCard();
-}
-
-// ---------------------------------------------------------------------------
-// Bottom sheet : l'heure réellement observée
-// ---------------------------------------------------------------------------
-
-const manualSheetEl = document.getElementById('manual-sheet');
-const manualBackdropEl = document.getElementById('manual-backdrop');
-const manualTimeInput = document.getElementById('manual-time');
-const manualNoteEl = document.getElementById('manual-note');
-
-/** Ouvre la saisie avec un champ **vide**.
- *
- *  Ni « maintenant » — la carte peut arriver dix minutes après le passage,
- *  et valider le pré-remplissage enregistrerait silencieusement une heure
- *  fausse — ni l'heure prédite, qui donnerait un écart nul par construction.
- *  Un champ vide coûte trois secondes de saisie ; les deux autres options
- *  coûtent la mesure. */
-function openManualSheet(p) {
-  manualTimeInput.value = '';
-  manualNoteEl.textContent = `${describeTrain(p)} · annoncé à ${fmtHMS(p.when)}`;
-  openSheet(manualSheetEl, manualBackdropEl);
-}
-
-/** Reconstruit l'instant observé à partir d'une heure saisie sans date.
- *
- *  La date de référence est celle du passage annoncé, pas celle du jour
- *  courant : un train annoncé à 00:05 et vu à 23:58 est passé la veille, et
- *  l'attacher au jour de l'annonce le décalerait de vingt-quatre heures. */
-function resolveObservedTime(hhmmss, reference) {
-  const [h, m, sec] = hhmmss.split(':').map(Number);
-  const ref = new Date(reference);
-  let observed = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate(), h, m, sec || 0, 0);
-  const dayMs = 86_400_000;
-  if (observed - ref > dayMs / 2) observed = new Date(observed - dayMs);
-  else if (ref - observed > dayMs / 2) observed = new Date(observed.getTime() + dayMs);
-  return observed;
-}
-
-async function onManualSubmit() {
-  const p = pendingManualPassage;
-  if (!p || !manualTimeInput.value) return;
-  const observed = resolveObservedTime(manualTimeInput.value, Date.parse(p.when));
-
-  pendingManualPassage = null;
-  acknowledged.add(p.trip_id);
-  closeSheet(manualSheetEl, manualBackdropEl);
-  try {
-    const res = await postObserve({
-      seen: true, observed_at: toIsoLocal(observed), precision_s: 30,
-      source: 'app:heure-saisie', trip_id: p.trip_id,
-    });
-    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    // Nommer l'écart mesuré : c'est la seule façon de voir tout de suite qu'on
-    // s'est trompé d'heure ou de train, pendant qu'« Annuler » est encore là.
-    if (res.recorded && typeof res.gap_s === 'number') {
-      const gap = Math.round(res.gap_s);
-      const signe = gap > 0 ? '+' : '';
-      showToast(`✓ Enregistré · ${signe}${gap} s vs annonce`, undo);
-    } else {
-      showToast('✓ Heure enregistrée', undo);
-    }
-  } catch (err) {
-    showToast('📡 Hors-ligne : réponse non envoyée');
-  }
-}
-
-/** « Je n'ai pas noté l'heure » — le seul chemin qui envoie encore l'heure
- *  prédite, et il le dit. C'est une observation de *présence* : elle atteste
- *  que le train a circulé, elle ne mesure aucun retard. Le serveur la range
- *  dans NON_TIMING_SOURCES et l'écarte du recalage (voir observation.py). */
-async function onManualUnknown() {
-  const p = pendingManualPassage;
-  if (!p) return;
-  pendingManualPassage = null;
-  acknowledged.add(p.trip_id);
-  closeSheet(manualSheetEl, manualBackdropEl);
-  try {
-    const res = await postObserve({
-      seen: true, observed_at: p.when, precision_s: 300,
-      source: 'app:confirmation', trip_id: p.trip_id,
-    });
-    const undo = res.id != null ? { label: 'Annuler', onClick: () => undoObservation(res.id) } : null;
-    showToast('✓ Noté : il a circulé (heure non mesurée)', undo);
-  } catch (err) {
-    showToast('📡 Hors-ligne : réponse non envoyée');
-  }
-}
-
-/** Feuille refermée d'un glissement, sans réponse : la question n'a pas été
- *  traitée, donc la carte revient tant que sa fenêtre court. Un geste
- *  d'échappement ne doit ni écrire ni faire disparaître la question. */
-function onManualDismissed() {
-  const p = pendingManualPassage;
-  if (!p || acknowledged.has(p.trip_id)) return;
-  pendingManualPassage = null;
-  if (Date.now() < currentConfirmExpireAt) showConfirmCard(p, currentConfirmExpireAt);
+  // Recalcul complet à chaque seconde : quelques centaines de passages à
+  // filtrer, rien de coûteux, et la liste avance d'elle-même quand un train
+  // est passé, sans attendre le prochain relevé temps réel.
+  refresh();
 }
 
 // ---------------------------------------------------------------------------
@@ -794,18 +526,11 @@ function setCompareVisible(visible) {
   histoCompareEl.classList.toggle('is-visible', visible);
 }
 
-async function openHistogram() {
+function openHistogram() {
   openSheet(histoSheetEl, histoBackdropEl);
   if (histoData) { renderHistoTab(); return; }
-  histoBodyEl.textContent = 'Chargement…';
+  histoBodyEl.textContent = 'Statistiques indisponibles pour le moment.';
   setCompareVisible(false);
-  try {
-    histoData = await fetchJson('/api/histogram');
-    renderHistoTab();
-  } catch (err) {
-    histoBodyEl.textContent = 'Statistiques indisponibles pour le moment.';
-    setCompareVisible(false);
-  }
 }
 
 function formatRatioFr(r) {
@@ -903,16 +628,8 @@ document.querySelectorAll('.tab').forEach((btn) => {
 // Câblage des boutons
 // ---------------------------------------------------------------------------
 
-document.getElementById('btn-seen').addEventListener('click', onSeenClick);
 document.getElementById('btn-histo').addEventListener('click', openHistogram);
-document.getElementById('confirm-yes').addEventListener('click', onConfirmYes);
-document.getElementById('confirm-no').addEventListener('click', onConfirmNo);
-document.getElementById('confirm-skip').addEventListener('click', onConfirmSkip);
-document.getElementById('manual-submit').addEventListener('click', onManualSubmit);
-document.getElementById('manual-unknown').addEventListener('click', onManualUnknown);
 
-wireDragToClose(manualSheetEl, manualBackdropEl, document.getElementById('manual-handle'),
-                onManualDismissed);
 wireDragToClose(histoSheetEl, histoBackdropEl, document.getElementById('histo-handle'));
 
 // ---------------------------------------------------------------------------
@@ -920,12 +637,20 @@ wireDragToClose(histoSheetEl, histoBackdropEl, document.getElementById('histo-ha
 // ---------------------------------------------------------------------------
 
 applyDayNight(); // synchrone dès le chargement : pas d'éclair jour avant le premier tick
-fetchNext();
-setInterval(fetchNext, POLL_MS);
+if (USE_MOCK) {
+  refresh();
+} else {
+  loadTimetable().then(loadRealtime);
+  setInterval(loadRealtime, REALTIME_POLL_MS);
+  setInterval(loadTimetable, TIMETABLE_POLL_MS);
+  // Retour au premier plan : le relevé a pu vieillir pendant la veille.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !freshRealtime()) loadRealtime();
+  });
+}
 setInterval(tick, TICK_MS);
 
-// Service worker : uniquement en contexte sécurisé (jamais sur http local),
-// et il ne met en cache que le statique — jamais /api/*.
+// Service worker : uniquement en contexte sécurisé (jamais sur http local).
 if (window.isSecureContext && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => { /* tant pis, l'app fonctionne sans */ });

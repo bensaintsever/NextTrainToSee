@@ -26,3 +26,6 @@ htmlcov/
 .idea/
 .vscode/
 logs/
+
+# Export de `nexttraintosee export`, régénéré par la CI à chaque publication.
+webapp/timetable.json

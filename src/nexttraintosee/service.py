@@ -30,7 +30,7 @@ from . import __version__
 from .config import AppConfig
 from .gtfs import GtfsError, GtfsFeed
 from .observation import Observation, ObservationKind
-from .predict import Direction, Passage, next_passages, predict_passages, service_days_around
+from .predict import Direction, Passage, Site, next_passages, predict_passages, service_days_around
 from .realtime import RealtimeError, empty_snapshot, load_snapshot
 from .report import DEFAULT_FIRST_HOUR, DEFAULT_LAST_HOUR, hourly_histogram
 from .store import Store
@@ -339,7 +339,7 @@ class PassageService:
         now = now or self._clock()
         with self._lock:
             if self._histogram is None:
-                self._histogram = self._compute_histogram(now.date())
+                self._histogram = histogram_payload(self.feed, self.config.site, now.date())
             return self._histogram
 
     def health_response(self, *, now: datetime | None = None) -> dict:
@@ -440,52 +440,61 @@ class PassageService:
         with Store(self.config.data.database) as store:
             return store.delete_observation(self.config.site.name, observation_id)
 
-    # -- histogramme moyenné semaine / week-end -------------------------------
 
-    def _compute_histogram(self, start_day: date) -> dict:
-        weekday_days = self._covered_days(start_day, weekend=False, count=5)
-        weekend_days = self._covered_days(start_day, weekend=True, count=2)
+# -- histogramme moyenné semaine / week-end -----------------------------------
 
-        weekday_hours = self._averaged_hours(weekday_days)
-        weekend_hours = self._averaged_hours(weekend_days)
-        peak = max(
-            [h["total"] for h in weekday_hours] + [h["total"] for h in weekend_hours],
-            default=0.0,
-        )
 
-        return {
-            "first_hour": DEFAULT_FIRST_HOUR,
-            "last_hour": DEFAULT_LAST_HOUR,
-            "peak": peak,
-            "weekday": {"label": "Semaine", "days": len(weekday_days), "hours": weekday_hours},
-            "weekend": {"label": "Week-end", "days": len(weekend_days), "hours": weekend_hours},
-        }
+def histogram_payload(feed: GtfsFeed, site: Site, start_day: date) -> dict:
+    """Histogramme moyenné semaine / week-end, au format de `GET /api/histogram`.
 
-    def _covered_days(self, start_day: date, *, weekend: bool, count: int) -> list[date]:
-        """Les `count` prochains jours (ouvrés ou de week-end) couverts par le flux."""
-        days: list[date] = []
-        day = start_day
-        # Un an suffit largement à trouver 5 jours ouvrés et 2 jours de
-        # week-end dans un flux valide ; ce garde-fou n'est là que pour ne
-        # jamais boucler indéfiniment sur un flux vide ou expiré.
-        for _ in range(366):
-            is_weekend_day = day.weekday() >= 5
-            if is_weekend_day == weekend and self.feed.calendar.covers(day):
-                days.append(day)
-                if len(days) == count:
-                    break
-            day += timedelta(days=1)
-        return days
+    Partagé par le serveur et par l'export statique : la PWA doit afficher la
+    même chose, qu'elle soit servie par `serve` ou publiée sans serveur.
+    """
+    weekday_days = _covered_days(feed, start_day, weekend=False, count=5)
+    weekend_days = _covered_days(feed, start_day, weekend=True, count=2)
 
-    def _averaged_hours(self, days: Sequence[date]) -> list[dict]:
-        hours = range(DEFAULT_FIRST_HOUR, DEFAULT_LAST_HOUR)
-        if not days:
-            return [{"hour": hour, "total": 0.0} for hour in hours]
+    weekday_hours = _averaged_hours(feed, site, weekday_days)
+    weekend_hours = _averaged_hours(feed, site, weekend_days)
+    peak = max(
+        [h["total"] for h in weekday_hours] + [h["total"] for h in weekend_hours],
+        default=0.0,
+    )
 
-        totals: Counter = Counter()
-        for day in days:
-            passages = predict_passages(self.feed, self.config.site, day)
-            for bucket in hourly_histogram(passages, DEFAULT_FIRST_HOUR, DEFAULT_LAST_HOUR):
-                totals[bucket.hour] += bucket.total
+    return {
+        "first_hour": DEFAULT_FIRST_HOUR,
+        "last_hour": DEFAULT_LAST_HOUR,
+        "peak": peak,
+        "weekday": {"label": "Semaine", "days": len(weekday_days), "hours": weekday_hours},
+        "weekend": {"label": "Week-end", "days": len(weekend_days), "hours": weekend_hours},
+    }
 
-        return [{"hour": hour, "total": totals[hour] / len(days)} for hour in hours]
+
+def _covered_days(feed: GtfsFeed, start_day: date, *, weekend: bool, count: int) -> list[date]:
+    """Les `count` prochains jours (ouvrés ou de week-end) couverts par le flux."""
+    days: list[date] = []
+    day = start_day
+    # Un an suffit largement à trouver 5 jours ouvrés et 2 jours de
+    # week-end dans un flux valide ; ce garde-fou n'est là que pour ne
+    # jamais boucler indéfiniment sur un flux vide ou expiré.
+    for _ in range(366):
+        is_weekend_day = day.weekday() >= 5
+        if is_weekend_day == weekend and feed.calendar.covers(day):
+            days.append(day)
+            if len(days) == count:
+                break
+        day += timedelta(days=1)
+    return days
+
+
+def _averaged_hours(feed: GtfsFeed, site: Site, days: Sequence[date]) -> list[dict]:
+    hours = range(DEFAULT_FIRST_HOUR, DEFAULT_LAST_HOUR)
+    if not days:
+        return [{"hour": hour, "total": 0.0} for hour in hours]
+
+    totals: Counter = Counter()
+    for day in days:
+        passages = predict_passages(feed, site, day)
+        for bucket in hourly_histogram(passages, DEFAULT_FIRST_HOUR, DEFAULT_LAST_HOUR):
+            totals[bucket.hour] += bucket.total
+
+    return [{"hour": hour, "total": totals[hour] / len(days)} for hour in hours]

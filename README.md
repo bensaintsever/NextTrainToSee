@@ -138,7 +138,7 @@ nexttraintosee validate
 nexttraintosee validate --fit          # propose une vitesse de ligne par branche
 
 # 5. Collecter à intervalle régulier, pour mesurer ce que valent les annonces
-nexttraintosee serve            # enregistre les passages à chaque rafraîchissement
+nexttraintosee serve            # enregistre les passages à chaque rafraîchissement (facultatif)
 nexttraintosee coverage --days 7   # puis, plus tard
 
 # 6. Écouter le capteur et journaliser les passages réellement observés
@@ -217,54 +217,44 @@ omnibus qui, lui, freine pour s'arrêter à Montaudran.
 
 ![L'application v0](docs/img/app-v0.jpeg)
 
-Une PWA servie par un serveur local — le pipeline validé reste en Python, le
-téléphone n'affiche que le résultat :
+Une PWA publiée sur GitHub Pages, **sans serveur** : aucune machine n'a besoin
+de rester allumée.
 
-```bash
-nexttraintosee serve            # puis http://<votre-mac>.local:8770 sur le téléphone
+```
+https://bensaintsever.github.io/NextTrainToSee/
 ```
 
 Prochain passage en grand sur la maquette pixel-art, direction « Depuis / Vers
 Matabiau » avec le côté où regarder, compte à rebours piloté par l'heure
-d'annonce (jamais en retard), passage suivant en bas, bouton « Il passe ! »
-qui journalise une observation à ±3 s, et bottom sheet avec l'histogramme
-semaine / week-end à échelle commune. Le serveur rafraîchit le temps réel
-toutes les 90 s et journalise ses relevés — la collecte pour `coverage`
-devient automatique. Conception détaillée : [`docs/app-v0.md`](docs/app-v0.md).
+d'annonce (jamais en retard), passage suivant en bas, et bottom sheet avec
+l'histogramme semaine / week-end à échelle commune. Conception détaillée :
+[`docs/app-v0.md`](docs/app-v0.md).
 
-### Le serveur en continu
+### Comment elle tient sans serveur
 
-En usage réel, `serve` tourne en permanence plutôt que dans un terminal ouvert :
-un `LaunchAgent` macOS (`~/Library/LaunchAgents/com.nexttraintosee.serve.plist`)
-le démarre à l'ouverture de session et le relance seul en cas d'arrêt. Ses
-journaux vivent dans `logs/serve.log` et `logs/serve.err.log`.
+La prédiction se décompose exactement en deux termes : *horaire en gare
+d'appui + retard* d'un côté, *temps de parcours jusqu'au point* de l'autre. Le
+second ne dépend jamais du retard, il peut donc être calculé à l'avance :
+
+* **chaque nuit**, la GitHub Action [`pages.yml`](.github/workflows/pages.yml)
+  télécharge les horaires SNCF, lance `nexttraintosee export` — le modèle de
+  marche Python, inchangé — et publie `timetable.json` avec la PWA. L'export
+  couvre une semaine : quelques nuits d'échec ne cassent rien, l'app signale
+  seulement des horaires vieux de plus de deux jours ;
+* **sur le téléphone**, [`webapp/realtime.js`](webapp/realtime.js) lit
+  directement le flux GTFS-RT de la SNCF (ouvert aux navigateurs), en extrait
+  le retard à Matabiau et l'ajoute aux horaires exportés. Si le flux est en
+  panne, l'app affiche l'horaire théorique et le dit.
+
+Pour essayer l'app en local, sans rien publier :
 
 ```bash
-launchctl print gui/$(id -u)/com.nexttraintosee.serve   # état
-tail -f logs/serve.log                                   # journal en direct
-launchctl kickstart -k gui/$(id -u)/com.nexttraintosee.serve  # redémarrer
-launchctl bootout gui/$(id -u)/com.nexttraintosee.serve  # arrêter définitivement
+nexttraintosee export                       # écrit webapp/timetable.json
+python3 -m http.server -d webapp 8000       # puis http://localhost:8000
 ```
 
-### Accès hors Wi-Fi domestique
-
-Le téléphone doit pouvoir joindre l'app même loin de la maison, en données
-mobiles. Sans IPv4 dédiée (le cas courant avec les box françaises — le FAI
-partage l'adresse entre plusieurs foyers), ouvrir un port sur la box ne
-suffit pas : la solution retenue est [Tailscale](https://tailscale.com), un
-réseau privé chiffré entre les appareils, gratuit en usage personnel, sans
-rien exposer publiquement.
-
-Une fois l'app installée et connectée sur le Mac et sur le téléphone (même
-compte), le nom stable à utiliser depuis le téléphone, Wi-Fi coupé ou non, est :
-
-```
-http://macbook-air-de-benjamin.tail04145f.ts.net:8770
-```
-
-Le serveur écoute déjà sur toutes les interfaces (`0.0.0.0`) : aucune
-configuration supplémentaire n'est nécessaire côté application, Tailscale
-ajoute simplement un chemin réseau vers la machine.
+`nexttraintosee serve` existe toujours pour l'API HTTP et la collecte continue
+des prédictions (`coverage`), mais l'application publiée n'en dépend plus.
 
 ## Le capteur
 
