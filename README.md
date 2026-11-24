@@ -19,9 +19,10 @@ facile, pas seulement possible :
 
 La dernière ligne est la vraie limite, et elle n'a rien à voir avec la
 difficulté du calcul : ces circulations **ne sont publiées nulle part**. C'est
-pour cela que ce projet combine deux sources — les horaires ouverts pour dire
+pour cela que le projet prévoit deux sources — les horaires ouverts pour dire
 *quand et quoi*, un capteur local pour voir *ce que personne ne publie* et pour
-recaler le modèle sur la réalité du terrain.
+recaler le modèle sur la réalité du terrain. La seconde n'est pas en service à
+Toulouse, et ne le sera pas : voir « État du projet » plus bas.
 
 ## Oui, il y a des API ouvertes
 
@@ -36,7 +37,7 @@ Tout ce qui suit est gratuit, sans inscription pour les deux premières :
 
 Ce qu'aucune ne donne : la **position en direct** d'un train, et le **fret**.
 La SNCF ne publie ni l'une ni l'autre. Le projet contourne le premier point par
-un modèle de marche, et le second par le capteur.
+un modèle de marche, et le second par le capteur — là où le site en admet un.
 
 ## Comment ça marche
 
@@ -277,17 +278,25 @@ Deux usages :
 
 ## État du projet
 
-Le noyau est écrit et testé (`python -m pytest`, 377 tests, sans réseau), et la
+Le noyau est écrit et testé (`python -m pytest`, 448 tests, sans réseau), et la
 chaîne complète a tourné sur les données réelles : géométrie OpenStreetMap
 résolue, horaires SNCF chargés, retards temps réel appliqués, modèle de marche
 confronté aux horaires.
 
 La configuration de Toulouse ne porte plus aucune estimation : 1 564 m par la
 voie jusqu'à Matabiau pour l'axe de Saint-Agne (dont les voies passent à 1 m du
-point) à 113 km/h, 1 565 m pour l'axe de Narbonne à 66 km/h.
+point) à 60 km/h, 1 565 m pour l'axe de Narbonne à 66 km/h.
 
-Reste la moitié capteur, qui demande un micro **au point d'observation** — c'est
-elle qui fera tomber les ±13 s à quelques secondes et révélera le fret.
+La moitié capteur, elle, ne se fera pas ici : le point d'observation est une
+passerelle, sans prise ni rien où fixer un micro à demeure. Donc le fret, les
+haut-le-pied et les trains de travaux resteront invisibles à cette installation
+— la ligne « non » du tableau d'ouverture est définitive, pas provisoire. Et le
+recalage repose sur les observations saisies depuis l'application, moins
+nombreuses et moins précises qu'un capteur : les ±13 s descendront au rythme
+des passages réellement vus, pas d'une campagne de mesures.
+
+Le détecteur reste dans le paquet, et testé : il est générique, et un autre
+point d'observation — un balcon, une fenêtre sur la voie — pourrait s'en servir.
 
 ### Un piège macOS : iCloud et les environnements virtuels
 
